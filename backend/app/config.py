@@ -65,6 +65,15 @@ class Settings(BaseSettings):
     # vai acessar diretamente (host acessível pelo navegador, ex localhost).
     # Trocar por S3 real no futuro é só mudar estas variáveis + credenciais.
     s3_endpoint_public: str = "http://localhost:9000"
+    # Endpoint usado para ASSINAR (SigV4 assina o header Host). Normalmente
+    # igual a s3_endpoint_public. Só difira quando um proxy entre o browser e
+    # o MinIO reescreve o header Host antes de repassar a requisição (ex:
+    # port-forwarding do GitHub Codespaces, que sempre entrega Host:
+    # localhost:<porta> pro container, mesmo quando acessado por um domínio
+    # público) — nesse caso a URL final ainda usa s3_endpoint_public (é o
+    # host que o navegador precisa alcançar), mas a assinatura é calculada
+    # com este host, que é o que o MinIO efetivamente vai enxergar.
+    s3_sign_endpoint: str | None = None
     s3_access_key: str = "minioadmin"
     s3_secret_key: str = "minioadmin"
     s3_bucket: str = "receitas"

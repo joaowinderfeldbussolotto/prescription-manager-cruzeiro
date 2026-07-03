@@ -69,6 +69,7 @@ services:
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@example.com}
       S3_ENDPOINT_INTERNAL: http://minio:9000
       S3_ENDPOINT_PUBLIC: ${S3_ENDPOINT_PUBLIC:-http://localhost:9000}
+      S3_SIGN_ENDPOINT: ${S3_SIGN_ENDPOINT:-}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
       S3_BUCKET: ${S3_BUCKET:-receitas}

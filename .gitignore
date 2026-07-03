@@ -229,3 +229,5 @@ frontend/dist/
 .DS_Store
 .idea/
 .vscode/
+aws/
+awscliv2.zip

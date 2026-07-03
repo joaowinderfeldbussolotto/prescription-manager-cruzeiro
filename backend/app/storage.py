@@ -18,6 +18,7 @@ import logging
 import time
 import uuid
 from functools import lru_cache
+from urllib.parse import urlsplit, urlunsplit
 
 import boto3
 from botocore.client import Config
@@ -63,6 +64,25 @@ def _client_public():
     return _build_client(settings.s3_endpoint_public)
 
 
+@lru_cache
+def _client_sign():
+    return _build_client(settings.s3_sign_endpoint or settings.s3_endpoint_public)
+
+
+def _with_public_host(url: str) -> str:
+    """Troca o scheme+host da URL assinada pelo host público, se configurado.
+
+    Necessário quando ``s3_sign_endpoint`` difere de ``s3_endpoint_public``
+    (proxy que reescreve o Host — ver comentário em ``config.py``). O
+    path/query (onde mora a assinatura) não é tocado.
+    """
+    if not settings.s3_sign_endpoint:
+        return url
+    signed = urlsplit(url)
+    public = urlsplit(settings.s3_endpoint_public)
+    return urlunsplit((public.scheme, public.netloc, signed.path, signed.query, signed.fragment))
+
+
 def ensure_bucket(retries: int = 10, delay: float = 1.5) -> None:
     """Garante que o bucket existe. MinIO não cria bucket automaticamente.
 
@@ -97,7 +117,7 @@ def generate_upload_url(content_type: str) -> tuple[str, str]:
     """
     ext = _ALLOWED_CONTENT_TYPES[content_type]
     key = f"receitas/{uuid.uuid4().hex}.{ext}"
-    url = _client_public().generate_presigned_url(
+    url = _client_sign().generate_presigned_url(
         "put_object",
         Params={
             "Bucket": settings.s3_bucket,
@@ -106,16 +126,17 @@ def generate_upload_url(content_type: str) -> tuple[str, str]:
         },
         ExpiresIn=settings.s3_presign_expires,
     )
-    return url, key
+    return _with_public_host(url), key
 
 
 def generate_view_url(key: str) -> str:
     """Gera uma presigned URL de GET pra visualizar a imagem no browser."""
-    return _client_public().generate_presigned_url(
+    url = _client_sign().generate_presigned_url(
         "get_object",
         Params={"Bucket": settings.s3_bucket, "Key": key},
         ExpiresIn=settings.s3_presign_expires,
     )
+    return _with_public_host(url)
 
 
 def delete_object(key: str) -> None:
