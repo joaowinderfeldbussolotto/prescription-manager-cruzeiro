@@ -87,18 +87,15 @@ async def atualizar_receita(receita_id: str, payload: ReceitaUpdate) -> ReceitaP
     changes = payload.model_dump(exclude_unset=True)
     merged = {**existing, **changes}
 
-    # regra de negócio reavaliada sobre o documento mesclado
-    if merged.get("od_esferico") is None and merged.get("oe_esferico") is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Pelo menos um grau esférico (OD ou OE) deve ser informado",
-        )
-
     # normaliza para date (existing vem como datetime do Mongo, changes como date)
     emissao = _as_date(merged.get("data_emissao"))
     validade = _as_date(merged.get("validade"))
+    # emissão nunca fica nula (default = hoje)
+    if emissao is None:
+        emissao = date.today()
+        changes["data_emissao"] = emissao
     # se a validade foi limpa, recompõe o default (+12 meses) — nunca fica nula
-    if validade is None and emissao is not None:
+    if validade is None:
         validade = add_12_months(emissao)
         changes["validade"] = validade
     if validade and emissao and validade < emissao:

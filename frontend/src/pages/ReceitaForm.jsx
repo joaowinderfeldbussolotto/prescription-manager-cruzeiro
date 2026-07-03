@@ -2,6 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { receitas, uploads, uploadToStorage, errorMessage } from '../api/client'
 
+// data de hoje em ISO (YYYY-MM-DD), sem shift de fuso
+function todayISO() {
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
 // +12 meses espelhando a regra do backend (29/02 -> 28/02).
 function plus12Months(iso) {
   if (!iso) return ''
@@ -16,7 +23,7 @@ function plus12Months(iso) {
 const num = (v) => (v === '' || v === null || v === undefined ? null : Number(v))
 const int = (v) => (v === '' || v === null || v === undefined ? null : parseInt(v, 10))
 
-const EMPTY = {
+const BASE = {
   data_emissao: '',
   validade: '',
   medico_nome: '',
@@ -92,8 +99,13 @@ export default function ReceitaForm() {
   const nav = useNavigate()
   const fileRef = useRef(null)
 
-  const [form, setForm] = useState(EMPTY)
+  // Na criação, a emissão já vem preenchida com a data de hoje (editável).
+  const [form, setForm] = useState(() =>
+    isEdit ? BASE : { ...BASE, data_emissao: todayISO(), validade: plus12Months(todayISO()) },
+  )
   const [validadeTouched, setValidadeTouched] = useState(false)
+  // Só a imagem aparece por padrão; os demais campos ficam atrás deste toggle.
+  const [showDetails, setShowDetails] = useState(isEdit)
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null) // {url, isPdf}
   const [existingKey, setExistingKey] = useState(null)
@@ -158,8 +170,14 @@ export default function ReceitaForm() {
     setPreview({ url: URL.createObjectURL(f), isPdf: f.type === 'application/pdf' })
   }
 
+  const hasImage = Boolean(file) || Boolean(existingKey)
+
   async function handleSubmit(e) {
     e.preventDefault()
+    if (!hasImage) {
+      setError('A imagem da receita é obrigatória.')
+      return
+    }
     setBusy(true)
     setError('')
     try {
@@ -171,7 +189,7 @@ export default function ReceitaForm() {
       }
 
       const payload = {
-        data_emissao: form.data_emissao,
+        data_emissao: form.data_emissao || null,
         validade: form.validade || null,
         medico_nome: form.medico_nome.trim() || null,
         medico_crm: form.medico_crm.trim() || null,
@@ -213,7 +231,7 @@ export default function ReceitaForm() {
       <div className="page-head">
         <div>
           <h1>{isEdit ? 'Editar receita' : 'Nova receita'}</h1>
-          <p className="subtitle">Dados estruturados da receita óptica</p>
+          <p className="subtitle">Envie a imagem da receita — os demais dados são opcionais</p>
         </div>
       </div>
 
@@ -221,111 +239,122 @@ export default function ReceitaForm() {
 
       <form onSubmit={handleSubmit}>
         <fieldset className="fieldset">
-          <legend>Emissão</legend>
-          <div className="form-grid">
-            <div className="field">
-              <label htmlFor="emissao">
-                Data de emissão <span className="req">*</span>
-              </label>
-              <input
-                id="emissao"
-                type="date"
-                required
-                value={form.data_emissao}
-                onChange={set('data_emissao')}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="validade">Validade</label>
-              <input
-                id="validade"
-                type="date"
-                value={form.validade}
-                onChange={set('validade')}
-              />
-              <span className="hint">Preenchida automaticamente (+12 meses), editável.</span>
-            </div>
-            <div className="field">
-              <label>Médico</label>
-              <input value={form.medico_nome} onChange={set('medico_nome')} />
-            </div>
-            <div className="field">
-              <label>CRM</label>
-              <input value={form.medico_crm} onChange={set('medico_crm')} />
-            </div>
+          <legend>
+            Imagem da receita <span className="req">*</span>
+          </legend>
+          <div
+            className={`dropzone ${preview ? 'has-preview' : ''}`}
+            onClick={() => fileRef.current?.click()}
+          >
+            {preview ? (
+              preview.isPdf ? (
+                <span>📄 PDF selecionado — clique para trocar</span>
+              ) : (
+                <img src={preview.url} alt="pré-visualização da receita" />
+              )
+            ) : (
+              <span>Clique para enviar (JPG, PNG, WebP ou PDF)</span>
+            )}
           </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,application/pdf"
+            onChange={onPickFile}
+            style={{ display: 'none' }}
+          />
+          <span className="hint">Único campo obrigatório. A data de emissão assume hoje por padrão.</span>
         </fieldset>
 
-        <fieldset className="fieldset">
-          <legend>Graus</legend>
-          <div className="form-grid">
-            <OlhoFields prefix="od" label="Olho Direito (OD)" form={form} set={set} />
-            <OlhoFields prefix="oe" label="Olho Esquerdo (OE)" form={form} set={set} />
-          </div>
-          <span className="hint">Informe ao menos um esférico (OD ou OE).</span>
-        </fieldset>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => setShowDetails((v) => !v)}
+          aria-expanded={showDetails}
+        >
+          {showDetails ? '− Ocultar detalhes da receita' : '+ Adicionar detalhes da receita'}
+        </button>
 
-        <fieldset className="fieldset">
-          <legend>Distância pupilar</legend>
-          <div className="form-grid">
-            <div className="field">
-              <label>DP (única)</label>
-              <input type="number" step="0.5" value={form.dp} onChange={set('dp')} />
-            </div>
-            <div className="field">
-              <label>DP longe</label>
-              <input type="number" step="0.5" value={form.dp_longe} onChange={set('dp_longe')} />
-            </div>
-            <div className="field">
-              <label>DP perto</label>
-              <input type="number" step="0.5" value={form.dp_perto} onChange={set('dp_perto')} />
-            </div>
-          </div>
-        </fieldset>
-
-        <fieldset className="fieldset">
-          <legend>Imagem &amp; observações</legend>
-          <div className="form-grid">
-            <div className="field">
-              <label>Imagem da receita</label>
-              <div
-                className={`dropzone ${preview ? 'has-preview' : ''}`}
-                onClick={() => fileRef.current?.click()}
-              >
-                {preview ? (
-                  preview.isPdf ? (
-                    <span>📄 PDF selecionado — clique para trocar</span>
-                  ) : (
-                    <img src={preview.url} alt="pré-visualização da receita" />
-                  )
-                ) : (
-                  <span>Clique para enviar (JPG, PNG, WebP ou PDF)</span>
-                )}
+        {showDetails && (
+          <div style={{ marginTop: '1.1rem' }}>
+            <fieldset className="fieldset">
+              <legend>Emissão</legend>
+              <div className="form-grid">
+                <div className="field">
+                  <label htmlFor="emissao">Data de emissão</label>
+                  <input
+                    id="emissao"
+                    type="date"
+                    value={form.data_emissao}
+                    onChange={set('data_emissao')}
+                  />
+                  <span className="hint">Padrão: hoje.</span>
+                </div>
+                <div className="field">
+                  <label htmlFor="validade">Validade</label>
+                  <input
+                    id="validade"
+                    type="date"
+                    value={form.validade}
+                    onChange={set('validade')}
+                  />
+                  <span className="hint">Preenchida automaticamente (+12 meses), editável.</span>
+                </div>
+                <div className="field">
+                  <label>Médico</label>
+                  <input value={form.medico_nome} onChange={set('medico_nome')} />
+                </div>
+                <div className="field">
+                  <label>CRM</label>
+                  <input value={form.medico_crm} onChange={set('medico_crm')} />
+                </div>
               </div>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp,application/pdf"
-                onChange={onPickFile}
-                style={{ display: 'none' }}
-              />
-            </div>
-            <div className="field">
-              <label>Observações</label>
-              <textarea
-                value={form.observacoes}
-                onChange={set('observacoes')}
-                style={{ minHeight: '140px' }}
-              />
-            </div>
+            </fieldset>
+
+            <fieldset className="fieldset">
+              <legend>Graus</legend>
+              <div className="form-grid">
+                <OlhoFields prefix="od" label="Olho Direito (OD)" form={form} set={set} />
+                <OlhoFields prefix="oe" label="Olho Esquerdo (OE)" form={form} set={set} />
+              </div>
+            </fieldset>
+
+            <fieldset className="fieldset">
+              <legend>Distância pupilar</legend>
+              <div className="form-grid">
+                <div className="field">
+                  <label>DP (única)</label>
+                  <input type="number" step="0.5" value={form.dp} onChange={set('dp')} />
+                </div>
+                <div className="field">
+                  <label>DP longe</label>
+                  <input type="number" step="0.5" value={form.dp_longe} onChange={set('dp_longe')} />
+                </div>
+                <div className="field">
+                  <label>DP perto</label>
+                  <input type="number" step="0.5" value={form.dp_perto} onChange={set('dp_perto')} />
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset className="fieldset">
+              <legend>Observações</legend>
+              <div className="field">
+                <textarea
+                  value={form.observacoes}
+                  onChange={set('observacoes')}
+                  style={{ minHeight: '120px' }}
+                />
+              </div>
+            </fieldset>
           </div>
-        </fieldset>
+        )}
 
         <div className="form-actions">
           <Link to={backTo} className="btn btn-ghost">
             Cancelar
           </Link>
-          <button className="btn btn-primary" disabled={busy}>
+          <button className="btn btn-primary" disabled={busy || !hasImage}>
             {busy ? 'Salvando…' : 'Salvar receita'}
           </button>
         </div>

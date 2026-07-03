@@ -40,14 +40,35 @@ def test_cpf_vazio_vira_none():
 
 # --- Receita -------------------------------------------------------------
 
+# A imagem é o ÚNICO campo obrigatório para cadastrar uma receita.
+IMG = "receitas/abc123.jpg"
+
+
+def test_imagem_obrigatoria():
+    with pytest.raises(ValidationError):
+        ReceitaCreate(data_emissao=date(2025, 3, 1))
+
+
+def test_so_a_imagem_basta():
+    # sem datas, sem grau, sem médico — apenas a imagem
+    r = ReceitaCreate(imagem_key=IMG)
+    assert r.imagem_key == IMG
+
+
+def test_data_emissao_default_hoje():
+    r = ReceitaCreate(imagem_key=IMG)
+    assert r.data_emissao == date.today()
+    assert r.validade == add_12_months(date.today())
+
+
 def test_validade_default_mais_12_meses():
-    r = ReceitaCreate(data_emissao=date(2025, 3, 1), od_esferico=-2.5)
+    r = ReceitaCreate(imagem_key=IMG, data_emissao=date(2025, 3, 1), od_esferico=-2.5)
     assert r.validade == date(2026, 3, 1)
 
 
 def test_validade_editavel():
     r = ReceitaCreate(
-        data_emissao=date(2025, 3, 1), validade=date(2025, 9, 1), oe_esferico=1.0
+        imagem_key=IMG, data_emissao=date(2025, 3, 1), validade=date(2025, 9, 1), oe_esferico=1.0
     )
     assert r.validade == date(2025, 9, 1)
 
@@ -55,23 +76,18 @@ def test_validade_editavel():
 def test_validade_anterior_a_emissao_rejeitada():
     with pytest.raises(ValidationError):
         ReceitaCreate(
-            data_emissao=date(2025, 3, 1), validade=date(2025, 1, 1), od_esferico=-1.0
+            imagem_key=IMG, data_emissao=date(2025, 3, 1), validade=date(2025, 1, 1)
         )
 
 
-def test_pelo_menos_um_esferico():
-    with pytest.raises(ValidationError):
-        ReceitaCreate(data_emissao=date(2025, 3, 1), od_cilindrico=-0.5)
-
-
-def test_um_olho_so_e_permitido():
-    r = ReceitaCreate(data_emissao=date(2025, 3, 1), oe_esferico=-1.25)
+def test_grau_opcional_um_olho_so():
+    r = ReceitaCreate(imagem_key=IMG, data_emissao=date(2025, 3, 1), oe_esferico=-1.25)
     assert r.od_esferico is None and r.oe_esferico == -1.25
 
 
 def test_eixo_fora_de_faixa():
     with pytest.raises(ValidationError):
-        ReceitaCreate(data_emissao=date(2025, 3, 1), od_esferico=-1.0, od_eixo=200)
+        ReceitaCreate(imagem_key=IMG, data_emissao=date(2025, 3, 1), od_eixo=200)
 
 
 def test_add_12_months_ano_bissexto():
@@ -85,7 +101,7 @@ def test_receita_public_coage_datetime_para_date():
         data_emissao=datetime(2025, 1, 10, tzinfo=timezone.utc),
         validade=datetime(2026, 1, 10, tzinfo=timezone.utc),
         data_cadastro=datetime(2025, 1, 10, 12, 0, tzinfo=timezone.utc),
-        od_esferico=-2.0,
+        imagem_key=IMG,
     )
     rp = ReceitaPublic(**doc)
     assert rp.data_emissao == date(2025, 1, 10)

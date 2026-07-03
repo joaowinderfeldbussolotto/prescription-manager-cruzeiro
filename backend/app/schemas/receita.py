@@ -36,7 +36,10 @@ _DP = dict(ge=10, le=120)
 
 
 class ReceitaBase(BaseModel):
-    data_emissao: date
+    data_emissao: date | None = Field(
+        default=None,
+        description="Default = data atual (calculado no backend se omitido)",
+    )
     validade: date | None = Field(
         default=None,
         description="Default = data_emissao + 12 meses (calculado no backend se omitido)",
@@ -65,29 +68,27 @@ class ReceitaBase(BaseModel):
     imagem_key: str | None = Field(default=None, description="Chave do objeto no MinIO/S3")
 
 
-def _at_least_one_esferico(od: float | None, oe: float | None) -> bool:
-    return od is not None or oe is not None
-
-
 class ReceitaCreate(ReceitaBase):
+    # A imagem é o único campo obrigatório para cadastrar uma receita; os
+    # demais dados (datas, graus, médico...) são opcionais e podem ser
+    # preenchidos depois.
+    imagem_key: str = Field(..., description="Chave do objeto no MinIO/S3 (obrigatório)")
+
     @model_validator(mode="after")
     def _defaults_and_rules(self) -> "ReceitaCreate":
+        # data de emissão padrão = hoje (editável)
+        if self.data_emissao is None:
+            self.data_emissao = date.today()
         # validade padrão = emissão + 12 meses (editável)
         if self.validade is None:
             self.validade = add_12_months(self.data_emissao)
         if self.validade < self.data_emissao:
             raise ValueError("validade não pode ser anterior à data de emissão")
-        # regra de negócio: pelo menos um esférico preenchido
-        if not _at_least_one_esferico(self.od_esferico, self.oe_esferico):
-            raise ValueError(
-                "Pelo menos um grau esférico (OD ou OE) deve ser informado"
-            )
         return self
 
 
 class ReceitaUpdate(BaseModel):
-    """Update parcial. A regra 'pelo menos um esférico' é reavaliada no router
-    sobre o documento já mesclado."""
+    """Update parcial — todos os campos opcionais."""
 
     data_emissao: date | None = None
     validade: date | None = None
@@ -111,6 +112,7 @@ class ReceitaUpdate(BaseModel):
 class ReceitaPublic(ReceitaBase):
     id: str
     cliente_id: str
+    data_emissao: date  # sempre presente após criação
     validade: date  # sempre presente após criação
     data_cadastro: datetime
     imagem_url: str | None = Field(

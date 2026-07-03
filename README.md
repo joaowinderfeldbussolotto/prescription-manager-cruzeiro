@@ -136,9 +136,11 @@ Navegador ──▶ nginx (frontend) ──/api──▶ FastAPI ──▶ Mongo
 
 ### Regras de negócio (backend)
 
-- **Validade da receita** = `data_emissao + 12 meses` por padrão, editável.
-- **Pelo menos um esférico** (OD _ou_ OE) deve ser informado — uma receita
-  pode registrar só um olho, ou vir sem adição.
+- **Cadastro de receita**: o **único campo obrigatório é a imagem**. A **data de
+  emissão** assume _hoje_ por padrão e a **validade**, _emissão + 12 meses_ —
+  ambas editáveis. Todos os demais dados (graus OD/OE, médico, DP, observações)
+  são opcionais. No frontend, só a imagem aparece por padrão; o resto fica atrás
+  de um "Adicionar detalhes da receita".
 - **Soft delete de cliente**: se houver receitas vinculadas, o cliente é
   arquivado (`deletado=true`) em vez de apagado, preservando o histórico.
 - **CPF**: validação de _formato_ apenas (não valida dígito verificador).
