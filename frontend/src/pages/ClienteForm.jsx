@@ -56,7 +56,7 @@ export default function ClienteForm() {
     }
     try {
       const saved = isEdit ? await clientes.update(id, payload) : await clientes.create(payload)
-      nav(`/clientes/${saved.id}`)
+      nav(`/clientes/${saved.id}`, isEdit ? undefined : { state: { justCreated: true } })
     } catch (err) {
       setError(errorMessage(err))
       setBusy(false)
