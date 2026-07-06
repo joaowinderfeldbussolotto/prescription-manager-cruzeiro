@@ -203,6 +203,9 @@ p {
   color: var(--muted);
   margin: 0;
 }
+.back-link {
+  margin-bottom: 0.6rem;
+}
 
 /* ---- Buttons ----------------------------------------------------------- */
 .btn {
@@ -651,6 +654,28 @@ tbody tr:hover {
   color: var(--ink-soft);
   background: var(--surface-2);
   border-color: var(--line);
+}
+.alert-success {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: #cfe3d5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.alert-success button {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0.7;
+}
+.alert-success button:hover {
+  opacity: 1;
 }
 
 .empty {

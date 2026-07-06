@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { receitas, clientes, errorMessage } from '../api/client'
 import { formatDate, formatGrau, formatEixo, formatDp } from '../utils/format'
 import ValidadeBadge from '../components/ValidadeBadge'
@@ -7,10 +7,12 @@ import ValidadeBadge from '../components/ValidadeBadge'
 export default function ReceitaView() {
   const { id } = useParams()
   const nav = useNavigate()
+  const location = useLocation()
   const [receita, setReceita] = useState(null)
   const [cliente, setCliente] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [showSuccess, setShowSuccess] = useState(Boolean(location.state?.justCreated))
 
   useEffect(() => {
     let active = true
@@ -28,6 +30,19 @@ export default function ReceitaView() {
       active = false
     }
   }, [id])
+
+  useEffect(() => {
+    if (!location.state?.justCreated) return
+    // limpa o state do history pra não reexibir o aviso num refresh da página
+    nav(location.pathname, { replace: true, state: {} })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (!showSuccess) return
+    const t = setTimeout(() => setShowSuccess(false), 6000)
+    return () => clearTimeout(t)
+  }, [showSuccess])
 
   async function handleDelete() {
     if (!window.confirm('Remover esta receita? A ação não pode ser desfeita.')) return
@@ -53,6 +68,23 @@ export default function ReceitaView() {
 
   return (
     <>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm back-link"
+        onClick={() => nav(`/clientes/${receita.cliente_id}`)}
+      >
+        ← Voltar para o cliente
+      </button>
+
+      {showSuccess && (
+        <div className="alert alert-success">
+          <span>✓ Receita cadastrada com sucesso.</span>
+          <button type="button" onClick={() => setShowSuccess(false)} aria-label="Fechar aviso">
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="page-head">
         <div>
           <p className="subtitle" style={{ margin: 0 }}>

@@ -211,7 +211,7 @@ export default function ReceitaForm() {
       const saved = isEdit
         ? await receitas.update(id, payload)
         : await receitas.create(clienteId, payload)
-      nav(`/receitas/${saved.id}`)
+      nav(`/receitas/${saved.id}`, isEdit ? undefined : { state: { justCreated: true } })
     } catch (err) {
       setError(errorMessage(err))
       setBusy(false)
