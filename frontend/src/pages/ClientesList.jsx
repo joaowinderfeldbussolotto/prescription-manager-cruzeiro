@@ -79,7 +79,7 @@ export default function ClientesList() {
         </div>
       ) : items.length === 0 ? (
         <div className="card empty">
-          <div className="wordmark">aureye</div>
+          <div className="wordmark">Cruzeiro</div>
           <p style={{ marginTop: '0.6rem' }}>
             {debounced ? 'Nenhum cliente encontrado para a busca.' : 'Nenhum cliente cadastrado ainda.'}
           </p>

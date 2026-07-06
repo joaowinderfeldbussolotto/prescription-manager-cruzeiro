@@ -51,7 +51,10 @@ export default function Login() {
     <div className="login-wrap">
       <div className="card card-pad login-card">
         <Logo size={54} />
-        <div className="wordmark">aureye</div>
+        <div className="brand-eyebrow" style={{ marginTop: '0.7rem' }}>
+          Relojoaria e Ótica
+        </div>
+        <div className="wordmark">Cruzeiro</div>
         <p className="tagline">Cadastro de clientes e receitas ópticas</p>
 
         {error && <div className="alert alert-danger">{error}</div>}

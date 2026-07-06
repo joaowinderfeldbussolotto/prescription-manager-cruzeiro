@@ -9,8 +9,13 @@ export default function Layout() {
       <header className="topbar">
         <div className="topbar-inner">
           <Link to="/" className="brand">
-            <Logo size={28} />
-            <span className="wordmark">aureye</span>
+            <Logo size={30} />
+            <span className="brand-lockup">
+              <span className="brand-eyebrow">Relojoaria e Ótica</span>
+              <span className="wordmark" style={{ fontSize: '1.3rem' }}>
+                Cruzeiro
+              </span>
+            </span>
           </Link>
           <nav className="nav">
             <NavLink to="/" end>

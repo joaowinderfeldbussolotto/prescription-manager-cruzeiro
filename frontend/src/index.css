@@ -1,5 +1,5 @@
 /* =========================================================================
-   Aureye — design tokens & base styles
+   Relojoaria e Ótica Cruzeiro — design tokens & base styles
    Estética: dourado/âmbar, traço fino, muito espaço em branco, sem sombras
    pesadas. Premium/joalheria, não SaaS genérico azul.
    ========================================================================= */
@@ -106,6 +106,20 @@ p {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+/* lockup do nome completo: "Relojoaria e Ótica" sobre "Cruzeiro" */
+.brand-lockup {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.05;
+}
+.brand-eyebrow {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 /* ---- Layout ------------------------------------------------------------ */

@@ -1,8 +1,9 @@
-# Aureye — Cadastro de Clientes e Receitas Ópticas
+# Relojoaria e Ótica Cruzeiro — Cadastro de Clientes e Receitas Ópticas
 
-Réplica moderna de um sistema originalmente feito em Oracle APEX para uma
-óptica: cadastro de **clientes** e das **receitas ópticas** associadas a cada
-um. Escopo atual: apenas o módulo óptico (cliente + receita) + autenticação.
+Réplica moderna de um sistema originalmente feito em Oracle APEX para a
+**Relojoaria e Ótica Cruzeiro**: cadastro de **clientes** e das **receitas
+ópticas** associadas a cada um. Escopo atual: apenas o módulo óptico (cliente +
+receita) + autenticação.
 
 > **Sem IA nesta fase.** O sistema é CRUD puro. A visão de copilot (busca em
 > linguagem natural, identificação de cliente por imagem) está registrada
