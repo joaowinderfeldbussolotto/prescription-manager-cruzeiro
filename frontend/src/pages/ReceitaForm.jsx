@@ -2,6 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { receitas, uploads, uploadToStorage, errorMessage } from '../api/client'
 
+// Feature toggle (build-time) do botão "Preencher com IA" — mesmo padrão de
+// VITE_DEV_AUTH em Login.jsx. Default ligado; EXTRACAO_IA_ENABLED=false no
+// backend também derruba o endpoint (404), então desligar só o frontend não
+// basta pra "ativar" a feature de novo — os dois toggles vêm da mesma env var.
+const EXTRACAO_IA_ENABLED = import.meta.env.VITE_EXTRACAO_IA_ENABLED !== 'false'
+
 // data de hoje em ISO (YYYY-MM-DD), sem shift de fuso
 function todayISO() {
   const d = new Date()
@@ -22,6 +28,19 @@ function plus12Months(iso) {
 
 const num = (v) => (v === '' || v === null || v === undefined ? null : Number(v))
 const int = (v) => (v === '' || v === null || v === undefined ? null : parseInt(v, 10))
+
+// Só preenche campos que estão vazios — nunca sobrescreve o que o atendente
+// já digitou manualmente antes de clicar em "Preencher com IA".
+function mergeEmptyFields(form, campos) {
+  const next = { ...form }
+  for (const [field, value] of Object.entries(campos)) {
+    if (value === null || value === undefined) continue
+    if (form[field] === '' || form[field] === null || form[field] === undefined) {
+      next[field] = value
+    }
+  }
+  return next
+}
 
 const BASE = {
   data_emissao: '',
@@ -106,9 +125,12 @@ export default function ReceitaForm() {
   const [validadeTouched, setValidadeTouched] = useState(false)
   // Só a imagem aparece por padrão; os demais campos ficam atrás deste toggle.
   const [showDetails, setShowDetails] = useState(isEdit)
-  const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null) // {url, isPdf}
-  const [existingKey, setExistingKey] = useState(null)
+  const [existingKey, setExistingKey] = useState(null) // key já persistida (modo edição)
+  const [uploadedKey, setUploadedKey] = useState(null) // key do upload eager recém-concluído
+  const [uploading, setUploading] = useState(false)
+  const [extracting, setExtracting] = useState(false)
+  const [extractionInfo, setExtractionInfo] = useState(null) // {campos, mock, aviso}
   const [loading, setLoading] = useState(isEdit)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -163,14 +185,50 @@ export default function ReceitaForm() {
     }
   }
 
-  function onPickFile(e) {
+  // Upload eager: assim que o arquivo é escolhido, já sobe pro storage (não
+  // espera o submit). Precisa de uma imagem_key real antes de poder chamar a
+  // extração por IA.
+  async function onPickFile(e) {
     const f = e.target.files?.[0]
     if (!f) return
-    setFile(f)
     setPreview({ url: URL.createObjectURL(f), isPdf: f.type === 'application/pdf' })
+    setUploadedKey(null)
+    setExtractionInfo(null)
+    setUploading(true)
+    setError('')
+    try {
+      const { upload_url, key } = await uploads.presign(f.type)
+      await uploadToStorage(upload_url, f)
+      setUploadedKey(key)
+    } catch (err) {
+      setError(errorMessage(err, 'Falha ao enviar a imagem. Tente novamente.'))
+      setPreview(null)
+    } finally {
+      setUploading(false)
+    }
   }
 
-  const hasImage = Boolean(file) || Boolean(existingKey)
+  // key da imagem "atual": upload novo tem prioridade sobre a já persistida
+  // (edição). Enquanto um upload novo estiver em andamento, ainda aponta pra
+  // a antiga — por isso os botões abaixo também checam `uploading`.
+  const currentImageKey = uploadedKey || existingKey
+  const hasImage = Boolean(currentImageKey)
+
+  async function handleExtract() {
+    if (!currentImageKey) return
+    setExtracting(true)
+    setError('')
+    try {
+      const resp = await receitas.extrairDados(currentImageKey)
+      setForm((f) => mergeEmptyFields(f, resp.campos))
+      setShowDetails(true)
+      setExtractionInfo(resp)
+    } catch (err) {
+      setError(errorMessage(err, 'Não foi possível extrair os dados da imagem.'))
+    } finally {
+      setExtracting(false)
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -181,13 +239,6 @@ export default function ReceitaForm() {
     setBusy(true)
     setError('')
     try {
-      let imagem_key = existingKey
-      if (file) {
-        const { upload_url, key } = await uploads.presign(file.type)
-        await uploadToStorage(upload_url, file)
-        imagem_key = key
-      }
-
       const payload = {
         data_emissao: form.data_emissao || null,
         validade: form.validade || null,
@@ -205,7 +256,7 @@ export default function ReceitaForm() {
         dp_longe: num(form.dp_longe),
         dp_perto: num(form.dp_perto),
         observacoes: form.observacoes.trim() || null,
-        imagem_key,
+        imagem_key: currentImageKey,
       }
 
       const saved = isEdit
@@ -244,7 +295,9 @@ export default function ReceitaForm() {
           </legend>
           <div
             className={`dropzone ${preview ? 'has-preview' : ''}`}
-            onClick={() => fileRef.current?.click()}
+            onClick={() => {
+              if (!uploading) fileRef.current?.click()
+            }}
           >
             {preview ? (
               preview.isPdf ? (
@@ -263,7 +316,37 @@ export default function ReceitaForm() {
             onChange={onPickFile}
             style={{ display: 'none' }}
           />
-          <span className="hint">Único campo obrigatório. A data de emissão assume hoje por padrão.</span>
+
+          {uploading && (
+            <div
+              className="hint"
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}
+            >
+              <span className="spinner" style={{ width: 16, height: 16 }} /> Enviando imagem…
+            </div>
+          )}
+
+          <span className="hint" style={{ display: 'block', marginTop: '0.4rem' }}>
+            Único campo obrigatório. A data de emissão assume hoje por padrão.
+          </span>
+
+          {EXTRACAO_IA_ENABLED && currentImageKey && !uploading && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={handleExtract}
+              disabled={extracting || busy}
+              style={{ marginTop: '0.75rem' }}
+            >
+              {extracting ? 'Extraindo…' : '✨ Preencher com IA'}
+            </button>
+          )}
+
+          {extractionInfo?.mock && (
+            <div className="alert alert-info" style={{ marginTop: '0.75rem' }}>
+              {extractionInfo.aviso}
+            </div>
+          )}
         </fieldset>
 
         <button
@@ -354,7 +437,7 @@ export default function ReceitaForm() {
           <Link to={backTo} className="btn btn-ghost">
             Cancelar
           </Link>
-          <button className="btn btn-primary" disabled={busy || !hasImage}>
+          <button className="btn btn-primary" disabled={busy || uploading || !hasImage}>
             {busy ? 'Salvando…' : 'Salvar receita'}
           </button>
         </div>

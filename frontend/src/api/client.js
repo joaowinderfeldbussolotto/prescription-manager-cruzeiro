@@ -41,6 +41,8 @@ export const receitas = {
     http.post(`/clientes/${clienteId}/receitas`, data).then((r) => r.data),
   update: (id, data) => http.put(`/receitas/${id}`, data).then((r) => r.data),
   remove: (id) => http.delete(`/receitas/${id}`).then((r) => r.data),
+  extrairDados: (imagemKey) =>
+    http.post('/receitas/extracao-ia', { imagem_key: imagemKey }).then((r) => r.data),
 }
 
 export const uploads = {

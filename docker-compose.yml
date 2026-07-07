@@ -66,6 +66,7 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       DEV_AUTH_ENABLED: ${DEV_AUTH_ENABLED:-true}
+      EXTRACAO_IA_ENABLED: ${EXTRACAO_IA_ENABLED:-true}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@example.com}
       S3_ENDPOINT_INTERNAL: http://minio:9000
       S3_ENDPOINT_PUBLIC: ${S3_ENDPOINT_PUBLIC:-http://localhost:9000}
@@ -82,6 +83,7 @@ services:
       args:
         VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
         VITE_DEV_AUTH: ${DEV_AUTH_ENABLED:-true}
+        VITE_EXTRACAO_IA_ENABLED: ${EXTRACAO_IA_ENABLED:-true}
     restart: unless-stopped
     depends_on:
       - backend

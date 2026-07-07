@@ -80,6 +80,14 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
     s3_presign_expires: int = 60 * 15  # 15 min
 
+    # --- Features (IA mock) ----------------------------------------------
+    # Liga/desliga o endpoint (e o botão no frontend) de extração de dados
+    # da receita a partir da imagem. Hoje é 100% mock (ver
+    # app/schemas/extracao.py) — o toggle existe pra poder esconder a
+    # feature sem redeploy de código, sem relação com custo de IA real
+    # (ainda não há chamada de IA real nenhuma).
+    extracao_ia_enabled: bool = True
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

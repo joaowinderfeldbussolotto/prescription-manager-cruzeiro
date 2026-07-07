@@ -1,21 +1,35 @@
 """Rotas de Receita (todas exigem sessão válida).
 
-Paths seguem o SPEC: criação/listagem aninhadas sob o cliente, e
-detalhe/edição/remoção diretas por id da receita.
+Paths seguem o SPEC: criação/listagem aninhadas sob o cliente,
+detalhe/edição/remoção diretas por id da receita, e uma ação por
+`imagem_key` (extração mock, sem cliente/receita associada ainda).
 """
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.concurrency import run_in_threadpool
 
 from app.auth.dependencies import get_current_user
+from app.config import settings
 from app.db.mongo import get_db
 from app.db.serialization import is_valid_object_id
 from datetime import date, datetime
 
 from app.models import cliente as cliente_repo
 from app.models import receita as receita_repo
+from app.schemas.extracao import (
+    ExtracaoReceitaRequest,
+    ExtracaoReceitaResponse,
+    mock_extrair_campos_receita,
+)
 from app.schemas.receita import ReceitaCreate, ReceitaPublic, ReceitaUpdate, add_12_months
-from app.storage import delete_object, generate_view_url
+from app.storage import (
+    ObjectNotFoundError,
+    StorageError,
+    delete_object,
+    generate_view_url,
+    get_object_bytes,
+)
 
 router = APIRouter(tags=["receitas"], dependencies=[Depends(get_current_user)])
 
@@ -70,6 +84,46 @@ async def listar_receitas_do_cliente(cliente_id: str) -> list[ReceitaPublic]:
     db = get_db()
     receitas = await receita_repo.list_by_cliente(db, cliente_id)
     return [_to_public(r) for r in receitas]
+
+
+# Registrada ANTES das rotas /receitas/{receita_id}: o Starlette resolve
+# ambiguidade entre rota estática e dinâmica pela ORDEM de registro. Hoje não
+# há colisão real (esta é POST; as rotas /receitas/{receita_id} são
+# GET/PUT/DELETE), mas evita que um futuro POST /receitas/{receita_id}
+# capture "extracao-ia" como se fosse um receita_id.
+@router.post("/receitas/extracao-ia", response_model=ExtracaoReceitaResponse)
+async def extrair_dados_receita(payload: ExtracaoReceitaRequest) -> ExtracaoReceitaResponse:
+    """Extrai (mock) campos sugeridos a partir da imagem já enviada ao storage.
+
+    MOCK: substituir por chamada de IA real (ver app/schemas/extracao.py).
+    Nunca persiste nada — só sugere campos pro frontend pré-preencher o
+    formulário; o atendente sempre revisa antes de salvar.
+    """
+    if not settings.extracao_ia_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Não disponível")
+
+    try:
+        image_bytes = await run_in_threadpool(get_object_bytes, payload.imagem_key)
+    except ObjectNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Imagem não encontrada no storage — envie a imagem antes de extrair os dados",
+        ) from None
+    except StorageError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Não foi possível acessar o storage de imagens no momento. Tente novamente.",
+        ) from None
+
+    campos = mock_extrair_campos_receita(image_bytes, payload.imagem_key)
+    return ExtracaoReceitaResponse(
+        campos=campos,
+        mock=True,
+        aviso=(
+            "Sugestão gerada por mock — não é leitura real da imagem. "
+            "Revise todos os campos antes de salvar."
+        ),
+    )
 
 
 @router.get("/receitas/{receita_id}", response_model=ReceitaPublic)

@@ -11,10 +11,12 @@ Relojoaria fica fora por ora.
 ponto onde IA atuaria futuramente usa lógica determinística/mock, claramente
 comentada no código (`# MOCK: substituir por chamada de IA real`).
 
-**Escopo atual:** CRUD de clientes e receitas + autenticação, sem nenhum
-componente de IA nem mockado. A visão de copilot está registrada na seção
-"Fase Futura" no final deste arquivo, só como decisão anotada — sem tela nem
-endpoint dela por ora.
+**Escopo atual:** CRUD de clientes e receitas + autenticação. Um único
+componente de IA existe, e é 100% mock: extração de dados da receita a
+partir da imagem (ver "Extração (mock) de dados da receita" nos
+Endpoints), atrás de feature toggle. A visão de copilot e de identificação
+de cliente por imagem está registrada na seção "Fase Futura" no final deste
+arquivo, só como decisão anotada — sem tela nem endpoint delas por ora.
 
 ---
 
@@ -189,6 +191,17 @@ parametrizável por role pra não precisar refatorar depois.
   mudar essa variável e as credenciais). Frontend faz PUT direto usando
   `upload_url`, depois envia `key` no create/update da receita.
 
+### Extração (mock) de dados da receita
+- `POST /receitas/extracao-ia` — recebe `{ imagem_key }` (de uma imagem já
+  enviada via presigned URL), retorna `{ campos, mock, aviso }` com uma
+  sugestão de preenchimento (OD/OE, DP, data de emissão, médico) pro
+  frontend pré-preencher o formulário de receita. **100% mock nesta fase**
+  (`# MOCK: substituir por chamada de IA real` em
+  `app/schemas/extracao.py`) — nunca persiste nada, o atendente sempre
+  revisa antes de salvar. Controlado por um feature toggle
+  (`EXTRACAO_IA_ENABLED`, default ligado) que derruba o endpoint (404) e
+  esconde o botão no frontend quando desligado.
+
 ---
 
 ## Telas (Frontend)
@@ -215,8 +228,10 @@ parametrizável por role pra não precisar refatorar depois.
 - Módulo de relojoaria / ordem de serviço
 - Autoregistro de usuário e tela de gerenciamento da allowlist (cadastro de
   usuário é manual, direto no banco, por ora)
-- Qualquer componente de IA, real ou mockado (copilot de busca, identificação
-  de cliente por imagem, OCR, recomendação de lente) — ver "Fase Futura"
+- IA além do já implementado (ver seção "Extração (mock) de dados da
+  receita" acima): copilot de busca, identificação de cliente por imagem,
+  recomendação de lente — nenhum real, nenhum mockado ainda; ver "Fase
+  Futura"
 - Deploy em Lambda/API Gateway/DynamoDB/S3 (Docker Compose local é suficiente
   por ora; migração AWS é próxima fase)
 

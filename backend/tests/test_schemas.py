@@ -5,6 +5,11 @@ import pytest
 from pydantic import ValidationError
 
 from app.schemas.cliente import ClienteCreate
+from app.schemas.extracao import (
+    ExtracaoReceitaCampos,
+    ExtracaoReceitaResponse,
+    mock_extrair_campos_receita,
+)
 from app.schemas.receita import ReceitaCreate, ReceitaPublic, add_12_months
 
 
@@ -106,3 +111,27 @@ def test_receita_public_coage_datetime_para_date():
     rp = ReceitaPublic(**doc)
     assert rp.data_emissao == date(2025, 1, 10)
     assert rp.validade == date(2026, 1, 10)
+
+
+# --- Extração (mock) de dados da imagem -----------------------------------
+
+def test_extracao_response_default_mock_true():
+    resp = ExtracaoReceitaResponse(campos=ExtracaoReceitaCampos())
+    assert resp.mock is True
+    assert resp.aviso is None
+
+
+def test_extracao_campos_todos_opcionais():
+    campos = ExtracaoReceitaCampos()
+    assert campos.od_esferico is None
+    assert campos.data_emissao is None
+
+
+def test_mock_campos_sao_compativeis_com_receita_create():
+    # os valores do mock não podem violar as faixas de ReceitaBase, senão um
+    # "Salvar" sem editar nada quebraria o create.
+    campos = mock_extrair_campos_receita(image_bytes=b"fake", imagem_key=IMG)
+    r = ReceitaCreate(imagem_key=IMG, **campos.model_dump(exclude_none=True))
+    assert r.od_esferico == campos.od_esferico
+    assert r.oe_esferico == campos.oe_esferico
+    assert r.dp == campos.dp

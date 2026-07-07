@@ -2,6 +2,7 @@
 from urllib.parse import urlparse
 
 import pytest
+from botocore.exceptions import ClientError
 
 from app import storage
 from app.config import settings
@@ -26,3 +27,12 @@ def test_view_url_gera_get_assinado():
     url = storage.generate_view_url("receitas/abc.jpg")
     assert "X-Amz-Signature" in url or "AWSAccessKeyId" in url
     assert "receitas/abc.jpg" in url
+
+
+def test_get_object_bytes_mapeia_nosuchkey_para_object_not_found(monkeypatch):
+    def _fake_get_object(**kwargs):
+        raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+
+    monkeypatch.setattr(storage._client_internal(), "get_object", _fake_get_object)
+    with pytest.raises(storage.ObjectNotFoundError):
+        storage.get_object_bytes("receitas/nao-existe.jpg")

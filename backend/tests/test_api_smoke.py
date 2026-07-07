@@ -35,6 +35,9 @@ def test_receitas_e_uploads_exigem_sessao():
         client.post("/api/uploads/presigned-url", json={"content_type": "image/png"}).status_code
         == 401
     )
+    assert (
+        client.post("/api/receitas/extracao-ia", json={"imagem_key": "x"}).status_code == 401
+    )
     assert client.get("/api/dashboard").status_code == 401
 
 
@@ -55,6 +58,7 @@ def test_openapi_lista_todas_as_rotas():
         "/api/clientes/{cliente_id}",
         "/api/clientes/{cliente_id}/receitas",
         "/api/receitas/{receita_id}",
+        "/api/receitas/extracao-ia",
         "/api/uploads/presigned-url",
         "/api/dashboard",
     }

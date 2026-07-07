@@ -144,3 +144,32 @@ def delete_object(key: str) -> None:
         _client_internal().delete_object(Bucket=settings.s3_bucket, Key=key)
     except ClientError:  # pragma: no cover - best effort
         logger.warning("Falha ao remover objeto '%s' do storage", key)
+
+
+class StorageError(Exception):
+    """Erro genérico ao operar no storage (rede, timeout, permissão etc.)."""
+
+
+class ObjectNotFoundError(StorageError):
+    """A chave informada não existe no bucket."""
+
+
+def get_object_bytes(key: str) -> bytes:
+    """Lê os bytes de um objeto do bucket (client interno).
+
+    Usado hoje só para validar que ``imagem_key`` existe antes do mock de
+    extração; quando a extração real de IA entrar, estes são os bytes que
+    serão enviados ao modelo com visão.
+    """
+    try:
+        resp = _client_internal().get_object(Bucket=settings.s3_bucket, Key=key)
+        return resp["Body"].read()
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in ("NoSuchKey", "404"):
+            raise ObjectNotFoundError(key) from exc
+        logger.warning("Falha ao ler objeto '%s' do storage: %s", key, exc)
+        raise StorageError(str(exc)) from exc
+    except BotoCoreError as exc:
+        logger.warning("Falha ao ler objeto '%s' do storage: %s", key, exc)
+        raise StorageError(str(exc)) from exc

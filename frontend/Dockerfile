@@ -11,8 +11,10 @@ COPY . .
 # no docker-compose. Sem GOOGLE_CLIENT_ID, o login usa o modo dev.
 ARG VITE_GOOGLE_CLIENT_ID=
 ARG VITE_DEV_AUTH=true
+ARG VITE_EXTRACAO_IA_ENABLED=true
 ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 ENV VITE_DEV_AUTH=$VITE_DEV_AUTH
+ENV VITE_EXTRACAO_IA_ENABLED=$VITE_EXTRACAO_IA_ENABLED
 RUN npm run build
 
 # --- serve ---------------------------------------------------------------
