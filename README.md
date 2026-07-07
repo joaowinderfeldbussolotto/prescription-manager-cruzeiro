@@ -11,6 +11,35 @@ receita) + autenticação.
 
 ---
 
+## Como este projeto foi construído
+
+Projeto construído majoritariamente com IA generativa, usando **Claude Code
+Web** e **Claude Code CLI** (Anthropic).
+
+Considerei aplicar Spec Driven Development formal, mas pareceu
+desproporcional pro escopo deste projeto — optei por um fluxo mais direto:
+
+- **Ciclos de planejamento**: para cada funcionalidade, usei o modo de
+  planejamento do Claude Code, explorando o raciocínio do Opus 4.8 pra gerar
+  planos de implementação detalhados (arquivos afetados, contratos de API,
+  decisões de design) antes de qualquer código ser escrito. Só depois de
+  revisar o plano e concordar com o que estava proposto é que pedia pra
+  implementar.
+- **~98% do código foi escrito pela IA.** A intervenção manual direta no
+  código foi mínima — praticamente restrita a debug (ex: diagnosticar erros
+  do deploy na instância EC2 em produção).
+- **Backends mockados pra validar a UI**: em vez de esperar a integração real
+  de serviços externos (ex: extração de dados por IA a partir da imagem da
+  receita — ver "Fase Futura" na `SPEC.md`), instruí a IA a construir
+  endpoints mock com o mesmo contrato de API que a versão real teria,
+  permitindo validar o fluxo de UI de ponta a ponta sem depender da
+  implementação final do serviço.
+- **Testes escritos pela IA**: a suíte de testes do backend (`backend/tests/`)
+  foi gerada junto com cada funcionalidade, cobrindo regras de negócio,
+  schemas e os principais caminhos de erro da API.
+
+---
+
 ## Stack
 
 | Camada | Tecnologia |
