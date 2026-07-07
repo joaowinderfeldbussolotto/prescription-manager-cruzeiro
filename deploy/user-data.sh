@@ -8,6 +8,9 @@
 set -euxo pipefail
 
 REPO_URL="https://github.com/joaowinderfeldbussolotto/prescription-manager-cruzeiro.git"
+# A PR ainda não foi mergeada na main — todo o código (docker-compose.yml
+# incluso) vive nesta branch. Clonar a default (main) traz um repo vazio.
+REPO_BRANCH="claude/optical-system-spec-gkmbr2"
 APP_DIR="/opt/app"
 
 # --- Docker + Compose plugin ------------------------------------------------
@@ -36,7 +39,7 @@ fi
 # --- Código (repo público, sem autenticação) --------------------------------
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
-git clone --depth 1 "$REPO_URL" .
+git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" .
 ls -la "$APP_DIR"  # log de diagnóstico: confirma o que o clone trouxe
 if [ ! -f "$APP_DIR/docker-compose.yml" ]; then
   echo "ERRO: docker-compose.yml não encontrado em $APP_DIR após o clone." >&2
