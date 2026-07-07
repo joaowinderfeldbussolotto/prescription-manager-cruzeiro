@@ -13,9 +13,9 @@ REPO_URL="https://github.com/joaowinderfeldbussolotto/prescription-manager-cruze
 REPO_BRANCH="claude/optical-system-spec-gkmbr2"
 APP_DIR="/opt/app"
 
-# --- Docker + Compose plugin ------------------------------------------------
+# --- Docker + Compose + Buildx plugins --------------------------------------
 dnf update -y
-dnf install -y docker git
+dnf install -y docker git jq
 systemctl enable --now docker
 usermod -aG docker ec2-user
 
@@ -23,6 +23,14 @@ mkdir -p /usr/local/lib/docker/cli-plugins
 curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64" \
   -o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+# `docker compose build`/`up --build` exige o plugin buildx (não vem
+# junto com o pacote `docker` do AL2023) — mesmo padrão de instalação do
+# docker-compose acima, baixando o binário da release mais recente.
+BUILDX_VERSION=$(curl -fsSL https://api.github.com/repos/docker/buildx/releases/latest | jq -r .tag_name)
+curl -fSL "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-amd64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-buildx
+chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
 
 # --- Swap ---------------------------------------------------------------
 # t2.micro tem só 1GiB de RAM — mongodb+minio+backend+frontend juntos é
