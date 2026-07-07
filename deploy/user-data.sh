@@ -37,6 +37,11 @@ fi
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 git clone --depth 1 "$REPO_URL" .
+ls -la "$APP_DIR"  # log de diagnóstico: confirma o que o clone trouxe
+if [ ! -f "$APP_DIR/docker-compose.yml" ]; then
+  echo "ERRO: docker-compose.yml não encontrado em $APP_DIR após o clone." >&2
+  exit 1
+fi
 
 # --- IP público via IMDSv2 ---------------------------------------------
 # Funciona corretamente mesmo com Elastic IP: o deploy.sh associa o EIP
@@ -66,8 +71,10 @@ chmod 600 "$APP_DIR/.env"
 # --- Sobe tudo -----------------------------------------------------------
 # Builda as imagens na própria instância (sem ECR/registry — mais simples,
 # mas o primeiro boot demora alguns minutos, principalmente o build do
-# frontend/Vite).
-docker compose up -d --build
+# frontend/Vite). `-f`/`--project-directory` explícitos: não depende do
+# diretório de trabalho corrente estar certo neste ponto do script.
+cd "$APP_DIR"
+docker compose --project-directory "$APP_DIR" -f "$APP_DIR/docker-compose.yml" up -d --build
 
 echo "=== deploy concluído. Backend/frontend em http://${PUBLIC_IP}:8080 ===" \
   >> /var/log/user-data-status.log
