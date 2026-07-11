@@ -25,23 +25,6 @@ function Bolha({ msg }) {
       <div className="chat-bubble">
         <p style={{ margin: 0 }}>{msg.texto}</p>
 
-        {msg.acoes?.length > 0 && (
-          <div className="chat-acoes">
-            {msg.acoes.map((a, i) => (
-              <div key={i} className="chat-acao">
-                <div className="chat-acao-tool">🔧 {a.tool}</div>
-                <pre>{JSON.stringify(a.argumentos, null, 2)}</pre>
-                {Object.keys(a.resultado || {}).length > 0 && (
-                  <>
-                    <div className="chat-acao-tool">↳ resultado</div>
-                    <pre>{JSON.stringify(a.resultado, null, 2)}</pre>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
         {msg.links?.length > 0 && (
           <div className="chat-links">
             {msg.links.map((l, i) => (
@@ -77,7 +60,6 @@ export default function Agente() {
         {
           autor: 'agente',
           texto: res.resposta,
-          acoes: res.acoes,
           links: res.links,
           aviso: res.aviso,
         },

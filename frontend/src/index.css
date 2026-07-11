@@ -762,31 +762,6 @@ tbody tr:hover {
   background: var(--gold-100);
   border-color: var(--gold-200);
 }
-.chat-acoes {
-  margin-top: 0.6rem;
-  display: grid;
-  gap: 0.5rem;
-}
-.chat-acao {
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 0.5rem 0.65rem;
-  font-size: 0.8rem;
-}
-.chat-acao-tool {
-  font-weight: 600;
-  color: var(--gold-700);
-  margin-bottom: 0.2rem;
-}
-.chat-acao pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 0.78rem;
-  color: var(--ink-soft);
-}
 .chat-links {
   margin-top: 0.6rem;
   display: flex;
