@@ -19,24 +19,64 @@ Web** e **Claude Code CLI** (Anthropic).
 Considerei aplicar Spec Driven Development formal, mas pareceu
 desproporcional pro escopo deste projeto — optei por um fluxo mais direto:
 
-- **Ciclos de planejamento**: para cada funcionalidade, usei o modo de
-  planejamento do Claude Code, explorando o raciocínio do Opus 4.8 pra gerar
-  planos de implementação detalhados (arquivos afetados, contratos de API,
-  decisões de design) antes de qualquer código ser escrito. Só depois de
-  revisar o plano e concordar com o que estava proposto é que pedia pra
-  implementar.
-- **~98% do código foi escrito pela IA.** A intervenção manual direta no
-  código foi mínima — praticamente restrita a debug (ex: diagnosticar erros
-  do deploy na instância EC2 em produção).
-- **Backends mockados pra validar a UI**: em vez de esperar a integração real
-  de serviços externos (ex: extração de dados por IA a partir da imagem da
-  receita — ver "Fase Futura" na `SPEC.md`), instruí a IA a construir
-  endpoints mock com o mesmo contrato de API que a versão real teria,
-  permitindo validar o fluxo de UI de ponta a ponta sem depender da
-  implementação final do serviço.
-- **Testes escritos pela IA**: a suíte de testes do backend (`backend/tests/`)
-  foi gerada junto com cada funcionalidade, cobrindo regras de negócio,
-  schemas e os principais caminhos de erro da API.
+### Ciclos de planejamento antes de código
+
+Para cada funcionalidade, usei o modo de planejamento do Claude Code,
+explorando o raciocínio do Opus 4.8 pra gerar planos de implementação
+detalhados (arquivos afetados, contratos de API, decisões de design) antes
+de qualquer código ser escrito. Só depois de revisar o plano e concordar
+com o que estava proposto é que pedia pra implementar.
+
+**Exemplo concreto**: upload eager de receita + extração IA mock. O
+planejamento explorou: "qual é o UX ideal (preview instant)?", "como
+validar imagem antes de submeter receita?", "se a IA for real depois, qual
+é o contrato de API que faria sentido?" — só depois disso foi escrito código.
+
+### ~98% do código escrito pela IA
+
+A intervenção manual direta no código foi mínima — praticamente restrita a
+debug (ex: diagnosticar erros do deploy na instância EC2 em produção).
+Isso demonstra que o planejamento antecipado permitiu implementações diretas,
+sem iterate-and-fix loops caros.
+
+### Validação em camadas
+
+Em vez de esperar a integração de serviços reais, cada feature foi validada
+em camadas:
+
+1. **Backend mockado**: endpoints mock com o mesmo contrato de API que a
+   versão real (ex: `/api/receitas/extracao-ia` retorna sugestões em JSON).
+   Permitiu exercitar UI de ponta a ponta sem Mongo/MinIO reais.
+
+2. **Testes unitários do backend**: a suíte (`backend/tests/`) foi gerada
+   junto com cada funcionalidade:
+   - Testes da camada feliz (happy path)
+   - Testes de erro (404, 422, 500)
+   - Isolamento de dependências via `monkeypatch` e `dependency_overrides`
+   - Validação de serialização (BSON ↔ JSON, date ↔ datetime)
+
+3. **Testes de integração via Playwright**: fluxo completo de UI (login →
+   cadastro de cliente → receita com upload eager → extração IA → visualização).
+   Rodou contra dev server Vite + backend-fake sem depender de BD real.
+
+4. **Validação sem dependências externas**: dev auth simples (sem Google),
+   mock de IA, timestamps previsíveis — tudo testável localmente.
+
+### Documentação de decisões
+
+Cada design choice foi capturada — não é só "como funciona", mas "por que
+funciona assim":
+- Por que imagem é obrigatória? Força documentação, reduz campos.
+- Por que soft delete? Preserva histórico se houver receitas.
+- Por que upload direto ao S3? Mais rápido, menos carga no backend,
+  padrão AWS nativo.
+- Por que feature toggles via env? Permite dev local vs prod sem alterar
+  código.
+
+**Resultado**: código estruturado em camadas (auth → routers → models →
+db/storage), com abstrações pensadas pra permitir migrations futuras
+(S3 real em vez de MinIO, DynamoDB em vez de MongoDB) sem impactar o
+frontend.
 
 ---
 
@@ -256,6 +296,148 @@ Todas as rotas de negócio ficam sob o prefixo `/api` e exigem sessão válida
 | GET | `/api/dashboard` | 3 métricas do dashboard |
 
 Documentação interativa (Swagger) em **http://localhost:8000/docs**.
+
+---
+
+## Manual de Uso
+
+### Autenticação e Permissões
+
+A aplicação suporta **dois modos de login**:
+
+| Modo | Descrição | Quando usar | Config |
+|------|-----------|-----------|--------|
+| **Login de Desenvolvimento** | Email + allowlist simples, sem OAuth | Dev local | `DEV_AUTH_ENABLED=true` |
+| **Login com Google** | Google OAuth, `id_token` validado no backend | Produção | `GOOGLE_CLIENT_ID=<ID>` |
+
+- **Allowlist**: usuários devem estar na collection `usuarios` do MongoDB (role: `admin` ou `atendente`).
+- Setar `ativo: false` bloqueia acesso imediatamente.
+- Dados do usuário (nome, email, role) vêm do token/allowlist; edição manual só no Mongo.
+
+### Fluxo 1: Cadastrar um Cliente
+
+**Campos obrigatórios**: nome e telefone  
+**Campos opcionais**: CPF (validação de formato apenas), email, data de nascimento, endereço
+
+**Fluxo na UI**: Dashboard → "Novo cliente" → preenche dados → "Salvar" → sucesso (toast + redireciona pra detalhe)
+
+### Fluxo 2: Buscar e Listar Clientes
+
+- Campo de busca com debounce 300ms
+- Busca por **nome ou telefone** (regex case-insensitive)
+- Paginação: 20 itens/página (máximo 100)
+- Exibe total de receitas por cliente
+- Click em cliente: abre `ClienteDetail`
+
+### Fluxo 3: Editar ou Remover Cliente
+
+**Editar**: click em cliente → detail → "Editar" → form pré-preenchido → "Salvar"
+
+**Remover**:
+- Sem receitas? Apaga completamente (hard delete)
+- Com receitas? Marca `deletado=true`, fica oculto mas histórico preservado
+
+### Fluxo 4: Cadastrar uma Receita (o fluxo mais importante)
+
+**Decisão crucial: imagem é obrigatória.** Tudo começa com upload da imagem; demais dados são opcionais.
+
+#### Passo 1: Selecionar imagem
+- Drag-and-drop ou clique
+- Tipos: JPEG, PNG, WebP, PDF
+- Upload **imediato** (PUT presigned URL direto pro MinIO/S3)
+- Ao terminar: habilita "Preencher com IA"
+
+#### Passo 2: Detalhes (opcional)
+- Toggle "Adicionar detalhes da receita"
+- **Datas**: emissão (default=hoje), validade (default=emissão+12m, recalcula se emissão mudar)
+- **Olho Direito (OD) + Esquerdo (OE)**: esférico, cilindrico, eixo, adição
+- **DP**: única, longe, perto
+- **Geral**: nome médico, CRM, observações
+
+**Validações**: validade ≥ emissão; ranges dos graus (validação "grosseira" apenas)
+
+#### Passo 3: Preencher com IA (opcional)
+- Requer: imagem uploaded + `EXTRACAO_IA_ENABLED=true`
+- Backend lê bytes da imagem, retorna sugestões
+- Frontend preenche **apenas campos vazios** (nunca sobrescreve)
+- Aviso laranja: "Sugestão gerada por mock — revise todos os campos"
+
+#### Passo 4: Salvar
+- Click "Salvar receita"
+- Redireciona pra `ReceitaView` + toast "Receita cadastrada com sucesso"
+
+### Fluxo 5: Visualizar Receita
+
+**Layout**: imagem grande (esquerda) + dados stacked (direita)
+- Datas & médico
+- Tabela OD/OE com graus
+- DP
+- Observações
+
+**Formatação**: datas `DD/MM/YYYY`, graus 2 decimais (ex: `-2.50`), eixo `0-180°`
+
+**Botões**: "Editar", "Remover"
+
+### Fluxo 6: Dashboard
+
+Ao fazer login, 3 métricas:
+1. **Total de clientes** (exclui deletados)
+2. **Receitas neste mês** (contagem por `data_cadastro`)
+3. **Receitas vencendo em 30 dias** (validade entre hoje e hoje+30d)
+
+### Features Principais
+
+#### Upload Direto ao S3/MinIO
+Imagens **não passam pelo backend HTTP**:
+1. Frontend pede presigned URL ao backend
+2. Frontend faz PUT direto no S3/MinIO
+3. Backend gera presigned URL de leitura (expiração curta)
+
+**Por quê?** Mais rápido, menos carga no backend, padrão AWS nativo.
+
+**Configuração**: `S3_ENDPOINT_PUBLIC` (navegador), `S3_ENDPOINT_INTERNAL` (backend)
+
+#### Extração de IA (Hoje é Mock)
+- Botão "Preencher com IA" sugestiona dados da receita a partir da imagem
+- **Hoje**: mock (dados fictícios)  
+- **Amanhã**: integração real com OCR/IA  
+- **Contrato é idêntico** → nenhuma mudança na UI
+
+Feature toggle: `EXTRACAO_IA_ENABLED` (env)
+
+### Decisões de Design que Afetam UX
+
+| Decisão | Efeito |
+|---------|--------|
+| **Imagem obrigatória** | Receita sem imagem não existe. Força documentação. |
+| **Upload eager** | Validação de tipo antes de salvar receita completa. |
+| **Detalhes colapsáveis** | Reduz visual clutter. Toggle "Adicionar detalhes". |
+| **Validade auto-calculada** | Default +12m, editável, recalcula se emissão mudar. |
+| **Graus opcionais** | Flexível; receita pode ter só um olho. |
+| **Soft delete** | Cliente com receitas fica oculto, histórico seguro. |
+| **CPF formato apenas** | Validação mínima; dígito verificador fica pra depois. |
+| **Presigned URLs curtas** | Segurança; URL compartilhada após expiração não funciona. |
+| **Feature toggles via `.env`** | Ativa/desativa IA, dev auth, Google sem redeploy. |
+
+### Configuração por Feature
+
+Edite `.env` e restarte (`docker compose up -d`):
+
+| Variável | Default | Efeito |
+|----------|---------|--------|
+| `DEV_AUTH_ENABLED` | `true` | Botão de login simples |
+| `GOOGLE_CLIENT_ID` | vazio | Botão "Entrar com Google" |
+| `EXTRACAO_IA_ENABLED` | `true` | Botão "Preencher com IA" |
+| `COOKIE_SECURE` | `false` | Cookie só funciona com HTTPS se `true` |
+| `CORS_ORIGINS` | `http://localhost:*` | Origins autorizadas pra CORS |
+
+### Próximos Passos (Road Map)
+
+- **IA real**: substitua o mock em `backend/app/schemas/extracao.py`. UI não muda.
+- **S3 real**: mude `S3_ENDPOINT_*` pra bucket AWS. Código não muda.
+- **Google OAuth**: registre Client ID no Google Cloud Console.
+- **Módulo de relojoaria**: estrutura pronta, fora de escopo.
+- **DynamoDB**: requer reescrita de `backend/app/models/*` + `backend/app/db/*`.
 
 ---
 
