@@ -11,6 +11,27 @@ receita) + autenticação.
 
 ---
 
+## ⚠️ Estado Atual do Deploy
+
+A instância EC2 (t2.micro) está **rodando, mas sem HTTPS nem Google OAuth**:
+
+- **URL pública**: via DNS da AWS (ex: `http://ec2-XX-XX-XX-XX.compute-1.amazonaws.com:8080`)
+- **Protocolo**: HTTP-only (sem certificado TLS — aviso no navegador)
+- **Autenticação**: dev auth (allowlist simples, sem validação de senha)
+  - Login: qualquer e-mail na allowlist (default: `admin@example.com`)
+  - Sem suporte a Google OAuth neste momento (requer HTTPS)
+- **Banco/Storage**: MongoDB e MinIO rodando containerizados na instância
+- **Custo**: ~US$10/mês (ou perto de zero no Free Tier)
+
+**Pra usar em produção real**, você vai precisar:
+1. **HTTPS + certificado real**: Let's Encrypt via `deploy/user-data.sh` (scripts prontos, requer rodá-los na instância via SSH)
+2. **Google OAuth**: configurar Client ID no Google Cloud Console após ter HTTPS
+3. Desabilitar dev auth: `DEV_AUTH_ENABLED=false` no `.env`
+
+Esse estado atual serve pra validação e testes; a infra tá pronta pra escalar.
+
+---
+
 ## Como este projeto foi construído
 
 Projeto construído majoritariamente com IA generativa, usando **Claude Code
