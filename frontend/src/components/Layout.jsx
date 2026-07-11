@@ -2,6 +2,8 @@ import { NavLink, Link, Outlet } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import Logo from './Logo'
 
+const AGENTE_ENABLED = import.meta.env.VITE_AGENTE_ENABLED !== 'false'
+
 export default function Layout() {
   const { user, logout } = useAuth()
   return (
@@ -22,6 +24,7 @@ export default function Layout() {
               Dashboard
             </NavLink>
             <NavLink to="/clientes">Clientes</NavLink>
+            {AGENTE_ENABLED && <NavLink to="/agente">Agente</NavLink>}
           </nav>
           <span className="topbar-spacer" />
           {user && (

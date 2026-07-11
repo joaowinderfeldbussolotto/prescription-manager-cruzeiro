@@ -729,6 +729,94 @@ tbody tr:hover {
   font-size: 0.9rem;
 }
 
+/* ---- Agente (chat) ------------------------------------------------------ */
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-height: 160px;
+}
+.chat-msg {
+  display: flex;
+}
+.chat-msg.user {
+  justify-content: flex-end;
+}
+.chat-msg.agente {
+  justify-content: flex-start;
+}
+.chat-bubble {
+  max-width: 80%;
+  padding: 0.75rem 0.95rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.chat-msg.user .chat-bubble {
+  background: var(--gold-100);
+  border-color: var(--gold-200);
+}
+.chat-acoes {
+  margin-top: 0.6rem;
+  display: grid;
+  gap: 0.5rem;
+}
+.chat-acao {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.65rem;
+  font-size: 0.8rem;
+}
+.chat-acao-tool {
+  font-weight: 600;
+  color: var(--gold-700);
+  margin-bottom: 0.2rem;
+}
+.chat-acao pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+.chat-links {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.chat-aviso {
+  margin: 0.6rem 0 0;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.8rem;
+}
+.chat-sugestoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+.chat-sugestoes .btn {
+  white-space: normal;
+  text-align: left;
+}
+.chat-input-row {
+  display: flex;
+  gap: 0.6rem;
+}
+.chat-input-row input {
+  flex: 1;
+}
+
 /* ---- Responsive -------------------------------------------------------- */
 @media (max-width: 780px) {
   .form-grid,
@@ -741,6 +829,9 @@ tbody tr:hover {
   }
   .nav a {
     padding: 0.4rem 0.55rem;
+  }
+  .chat-bubble {
+    max-width: 92%;
   }
   .content {
     padding: 1.5rem 1rem 2.5rem;
