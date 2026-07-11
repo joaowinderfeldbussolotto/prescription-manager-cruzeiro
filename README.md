@@ -15,7 +15,7 @@ receita) + autenticação.
 
 A instância EC2 (t2.micro) está **rodando, mas sem HTTPS nem Google OAuth**:
 
-- **URL pública**: via DNS da AWS (ex: `http://ec2-XX-XX-XX-XX.compute-1.amazonaws.com:8080`)
+- **URL pública**: http://100.51.105.57:8080/
 - **Protocolo**: HTTP-only (sem certificado TLS — aviso no navegador)
 - **Autenticação**: dev auth (allowlist simples, sem validação de senha)
   - Login: qualquer e-mail na allowlist (default: `admin@example.com`)
