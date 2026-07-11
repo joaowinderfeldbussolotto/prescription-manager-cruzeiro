@@ -1,0 +1,4 @@
+# Chave privada gerada pelo deploy.sh — nunca commitar.
+*.pem
+# Estado local do deploy (IDs de recursos criados) — específico de cada execução.
+.deploy-state

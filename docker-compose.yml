@@ -1,0 +1,97 @@
+# Orquestração local do Aureye (dev). Sobe tudo com `docker compose up --build`.
+# Valores têm defaults sensatos — funciona sem .env. Para customizar, copie
+# .env.example para .env na raiz.
+
+services:
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+      # CORS para o PUT direto do navegador na presigned URL
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_CORS_ALLOW_ORIGIN:-*}
+    ports:
+      - "9000:9000" # API S3
+      - "9001:9001" # console web
+    volumes:
+      - minio_data:/data
+
+  # Garante que o bucket exista antes do primeiro upload (MinIO não cria sozinho).
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-minioadmin} ${S3_SECRET_KEY:-minioadmin}; do
+        echo 'aguardando minio...'; sleep 1;
+      done;
+      mc mb --ignore-existing local/${S3_BUCKET:-receitas};
+      echo 'bucket pronto';
+      exit 0;
+      "
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      APP_NAME: "Aureye API"
+      ENVIRONMENT: development
+      API_PREFIX: /api
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:5173,http://localhost}
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: ${MONGO_DB_NAME:-aureye}
+      JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      DEV_AUTH_ENABLED: ${DEV_AUTH_ENABLED:-true}
+      EXTRACAO_IA_ENABLED: ${EXTRACAO_IA_ENABLED:-true}
+      AGENTE_ENABLED: ${AGENTE_ENABLED:-true}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@example.com}
+      S3_ENDPOINT_INTERNAL: http://minio:9000
+      S3_ENDPOINT_PUBLIC: ${S3_ENDPOINT_PUBLIC:-http://localhost:9000}
+      S3_SIGN_ENDPOINT: ${S3_SIGN_ENDPOINT:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-receitas}
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+        VITE_DEV_AUTH: ${DEV_AUTH_ENABLED:-true}
+        VITE_EXTRACAO_IA_ENABLED: ${EXTRACAO_IA_ENABLED:-true}
+        VITE_AGENTE_ENABLED: ${AGENTE_ENABLED:-true}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  mongo_data:
+  minio_data:
