@@ -39,6 +39,7 @@ def test_receitas_e_uploads_exigem_sessao():
         client.post("/api/receitas/extracao-ia", json={"imagem_key": "x"}).status_code == 401
     )
     assert client.get("/api/dashboard").status_code == 401
+    assert client.post("/api/agente/mensagem", json={"mensagem": "x"}).status_code == 401
 
 
 def test_dev_login_email_invalido_422():
@@ -61,5 +62,6 @@ def test_openapi_lista_todas_as_rotas():
         "/api/receitas/extracao-ia",
         "/api/uploads/presigned-url",
         "/api/dashboard",
+        "/api/agente/mensagem",
     }
     assert esperadas.issubset(paths.keys())

@@ -8,6 +8,7 @@ import ClienteForm from './pages/ClienteForm'
 import ClienteDetail from './pages/ClienteDetail'
 import ReceitaForm from './pages/ReceitaForm'
 import ReceitaView from './pages/ReceitaView'
+import Agente from './pages/Agente'
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/clientes/:clienteId/receitas/nova" element={<ReceitaForm />} />
           <Route path="/receitas/:id" element={<ReceitaView />} />
           <Route path="/receitas/:id/editar" element={<ReceitaForm />} />
+          <Route path="/agente" element={<Agente />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

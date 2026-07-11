@@ -10,7 +10,7 @@ set -euxo pipefail
 REPO_URL="https://github.com/joaowinderfeldbussolotto/prescription-manager-cruzeiro.git"
 # A PR ainda não foi mergeada na main — todo o código (docker-compose.yml
 # incluso) vive nesta branch. Clonar a default (main) traz um repo vazio.
-REPO_BRANCH="claude/optical-system-spec-gkmbr2"
+REPO_BRANCH="claude/agente-chat-mock"
 APP_DIR="/opt/app"
 
 # --- Docker + Compose + Buildx plugins --------------------------------------

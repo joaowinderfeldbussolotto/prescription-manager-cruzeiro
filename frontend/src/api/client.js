@@ -54,6 +54,10 @@ export const dashboard = {
   get: () => http.get('/dashboard').then((r) => r.data),
 }
 
+export const agente = {
+  enviar: (mensagem) => http.post('/agente/mensagem', { mensagem }).then((r) => r.data),
+}
+
 // PUT direto no storage (MinIO/S3) usando a presigned URL. Não passa pelo
 // axios `http` (baseURL /api) — vai direto pro endpoint do storage.
 export async function uploadToStorage(uploadUrl, file) {

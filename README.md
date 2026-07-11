@@ -15,7 +15,7 @@ receita) + autenticação.
 
 A instância EC2 (t2.micro) está **rodando, mas sem HTTPS nem Google OAuth**:
 
-- **URL pública**: via DNS da AWS (ex: `http://ec2-XX-XX-XX-XX.compute-1.amazonaws.com:8080`)
+- **URL pública**: http://100.51.105.57:8080/
 - **Protocolo**: HTTP-only (sem certificado TLS — aviso no navegador)
 - **Autenticação**: dev auth (allowlist simples, sem validação de senha)
   - Login: qualquer e-mail na allowlist (default: `admin@example.com`)
@@ -276,7 +276,7 @@ backend/
     db/                # conexão Mongo async + serialização BSON<->API
     models/            # camada de persistência (usuario, cliente, receita)
     schemas/           # Pydantic (request/response)
-    routers/           # auth, clientes, receitas, uploads, dashboard
+    routers/           # auth, clientes, receitas, uploads, dashboard, agente
     storage.py         # MinIO/S3 (boto3) + presigned URLs
   tests/               # testes de schema/regra e de presign
 frontend/
@@ -284,7 +284,7 @@ frontend/
     api/               # client axios + endpoints
     context/           # AuthContext (sessão)
     components/        # Logo, Layout, ValidadeBadge, ProtectedRoute
-    pages/             # login, dashboard, clientes, receitas
+    pages/             # login, dashboard, clientes, receitas, agente
     utils/             # formatação e status de validade
   nginx.conf           # serve o build + proxy /api
 docker-compose.yml
@@ -315,6 +315,7 @@ Todas as rotas de negócio ficam sob o prefixo `/api` e exigem sessão válida
 | DELETE | `/api/receitas/{id}` | Remove |
 | POST | `/api/uploads/presigned-url` | Presigned URL de upload |
 | GET | `/api/dashboard` | 3 métricas do dashboard |
+| POST | `/api/agente/mensagem` | Chat com o agente (mock) — ver "Agente" no Manual de Uso |
 
 Documentação interativa (Swagger) em **http://localhost:8000/docs**.
 
@@ -406,6 +407,43 @@ Ao fazer login, 3 métricas:
 2. **Receitas neste mês** (contagem por `data_cadastro`)
 3. **Receitas vencendo em 30 dias** (validade entre hoje e hoje+30d)
 
+### Fluxo 7: Agente (chat em linguagem natural — mock)
+
+Aba **Agente**: um chat onde o usuário cadastra, edita e busca clientes
+conversando, ao invés de preencher formulários. Ex: "Cadastra a cliente Maria
+Souza, CPF 111.222.333-44…" ou "Busca as receitas da Maria Souza".
+
+**Decisão de design importante: a interpretação da frase é mock, mas as
+ações no banco são reais.** Não há LLM nesta fase — e, como o frontend **só
+oferece frases fixas** (chips de sugestão, sem texto livre), o backend não
+precisa de NLU nem de regex pra extrair intenção e dados: ele faz uma
+**correspondência exata** entre a mensagem recebida e uma tabela de cenários
+conhecidos (`CENARIOS_MOCK` em `backend/app/schemas/agente.py`), cada um já
+com o *intent* e os argumentos que a tool precisa. **A partir daí, a
+execução é 100% real** — reusa os mesmos repositórios de `routers/clientes.py`
+(`cliente_repo.create/update/list_paginated`): cadastra clientes de verdade,
+atualiza telefone de verdade, e os links retornados abrem clientes reais com
+os dados carregados. Se a busca por nome for ambígua (mais de um cliente
+encontrado), o agente devolve **um link para cada um**, ao invés de adivinhar.
+
+Por que exact match em vez de regex/heurística de linguagem: eliminar de vez
+os edge cases de parsing (acentuação, ordem das palavras, nomes compostos)
+sem esconder a mecânica real do fluxo — a tabela de cenários **é** o
+contrato de intent + argumentos que um LLM real produziria a partir de texto
+livre; hoje ela é preenchida à mão porque as frases de entrada já são
+conhecidas de antemão (são os próprios chips do frontend).
+
+**O que muda quando um LLM real entrar** (fora de escopo agora): só a
+função `interpretar_mensagem` — troca o lookup na tabela por uma chamada ao
+modelo com tool-calling, produzindo o mesmo formato de saída (`intent` +
+`argumentos`). O contrato de request/response da API, a execução das tools
+no banco e a UI do chat **não mudam**. O campo de texto do chat já existe na
+tela, mas fica desabilitado — sinalizando que o texto livre é o próximo
+passo, não uma reescrita de tela.
+
+**Toggle:** `AGENTE_ENABLED=false` no `.env` esconde a aba e desliga o
+endpoint (404).
+
 ### Features Principais
 
 #### Upload Direto ao S3/MinIO
@@ -438,7 +476,9 @@ Feature toggle: `EXTRACAO_IA_ENABLED` (env)
 | **Soft delete** | Cliente com receitas fica oculto, histórico seguro. |
 | **CPF formato apenas** | Validação mínima; dígito verificador fica pra depois. |
 | **Presigned URLs curtas** | Segurança; URL compartilhada após expiração não funciona. |
-| **Feature toggles via `.env`** | Ativa/desativa IA, dev auth, Google sem redeploy. |
+| **Feature toggles via `.env`** | Ativa/desativa IA, dev auth, Google, Agente sem redeploy. |
+| **Agente por sugestões fixas** | Sem texto livre ainda; catálogo de frases exercitando cada caso de uso. |
+| **Interpretação do Agente por exact match** | Sem regex/NLU nesta fase; tools que ele aciona são reais no banco. |
 
 ### Configuração por Feature
 
@@ -449,12 +489,17 @@ Edite `.env` e restarte (`docker compose up -d`):
 | `DEV_AUTH_ENABLED` | `true` | Botão de login simples |
 | `GOOGLE_CLIENT_ID` | vazio | Botão "Entrar com Google" |
 | `EXTRACAO_IA_ENABLED` | `true` | Botão "Preencher com IA" |
+| `AGENTE_ENABLED` | `true` | Aba "Agente" (chat mock) |
 | `COOKIE_SECURE` | `false` | Cookie só funciona com HTTPS se `true` |
 | `CORS_ORIGINS` | `http://localhost:*` | Origins autorizadas pra CORS |
 
 ### Próximos Passos (Road Map)
 
-- **IA real**: substitua o mock em `backend/app/schemas/extracao.py`. UI não muda.
+- **IA real (extração de receita)**: substitua o mock em `backend/app/schemas/extracao.py`. UI não muda.
+- **LLM real (Agente)**: substitua o lookup por exact match em
+  `interpretar_mensagem` (`backend/app/schemas/agente.py`) por tool-calling
+  de um modelo de verdade, e destrave o campo de texto livre em
+  `frontend/src/pages/Agente.jsx`. Contrato de API e execução das tools não mudam.
 - **S3 real**: mude `S3_ENDPOINT_*` pra bucket AWS. Código não muda.
 - **Google OAuth**: registre Client ID no Google Cloud Console.
 - **Módulo de relojoaria**: estrutura pronta, fora de escopo.

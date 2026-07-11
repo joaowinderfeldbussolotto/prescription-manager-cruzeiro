@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     # (ainda não há chamada de IA real nenhuma).
     extracao_ia_enabled: bool = True
 
+    # --- Features (Agente mock) ------------------------------------------
+    # Liga/desliga a aba "Agente" (chat com agente de linguagem natural mock;
+    # tools reais no banco — ver app/schemas/agente.py). O toggle existe pra
+    # poder esconder a feature sem redeploy de código, sem relação com custo
+    # de LLM real (ainda não há chamada de LLM real nenhuma).
+    agente_enabled: bool = True
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

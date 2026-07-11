@@ -11,12 +11,14 @@ Relojoaria fica fora por ora.
 ponto onde IA atuaria futuramente usa lógica determinística/mock, claramente
 comentada no código (`# MOCK: substituir por chamada de IA real`).
 
-**Escopo atual:** CRUD de clientes e receitas + autenticação. Um único
-componente de IA existe, e é 100% mock: extração de dados da receita a
-partir da imagem (ver "Extração (mock) de dados da receita" nos
-Endpoints), atrás de feature toggle. A visão de copilot e de identificação
-de cliente por imagem está registrada na seção "Fase Futura" no final deste
-arquivo, só como decisão anotada — sem tela nem endpoint delas por ora.
+**Escopo atual:** CRUD de clientes e receitas + autenticação. Dois
+componentes de "IA" existem, e são 100% mock: extração de dados da receita a
+partir da imagem (ver "Extração (mock) de dados da receita" nos Endpoints) e
+o **Agente** — um chat em linguagem natural que cadastra/edita/busca
+clientes (ver "Agente (mock)" nos Endpoints). Nos dois, a interpretação é
+simulada, mas cada um está atrás de feature toggle. A identificação de
+cliente por imagem segue registrada só como decisão anotada na seção "Fase
+Futura" no final deste arquivo, sem tela nem endpoint ainda.
 
 ---
 
@@ -202,6 +204,22 @@ parametrizável por role pra não precisar refatorar depois.
   (`EXTRACAO_IA_ENABLED`, default ligado) que derruba o endpoint (404) e
   esconde o botão no frontend quando desligado.
 
+### Agente (mock)
+- `POST /agente/mensagem` — recebe `{ mensagem }`, retorna
+  `{ resposta, acoes, links, mock, aviso }`. **Interpretação 100% mock**: sem
+  LLM, sem regex — correspondência exata contra um catálogo fixo de frases
+  conhecidas (`CENARIOS_MOCK` em `app/schemas/agente.py`), porque o frontend
+  só oferece essas frases como chips de sugestão (sem texto livre nesta
+  fase). **As tools que a interpretação aciona são reais**: cadastram,
+  editam e buscam clientes de verdade (reusam `cliente_repo`, os mesmos
+  repositórios de `routers/clientes.py`) — os links retornados abrem
+  clientes reais com dados carregados; busca ambígua por nome retorna um
+  link por cliente encontrado. Controlado por feature toggle
+  (`AGENTE_ENABLED`, default ligado) que derruba o endpoint (404) e esconde a
+  aba no frontend quando desligado. Quando um LLM real substituir o exact
+  match, o contrato de request/response e a execução das tools não mudam —
+  só a implementação de `interpretar_mensagem`.
+
 ---
 
 ## Telas (Frontend)
@@ -220,6 +238,9 @@ parametrizável por role pra não precisar refatorar depois.
    "documento + metadados")
 6. **Dashboard leve** (opcional, 3 cards) — total de clientes, receitas
    cadastradas no mês, receitas vencendo nos próximos 30 dias
+7. **Agente** (mock) — chat em linguagem natural via catálogo fixo de
+   sugestões (sem texto livre ainda); cadastra/edita/busca clientes de
+   verdade, com trilha de tools executadas e links pras páginas afetadas
 
 ---
 
@@ -228,10 +249,10 @@ parametrizável por role pra não precisar refatorar depois.
 - Módulo de relojoaria / ordem de serviço
 - Autoregistro de usuário e tela de gerenciamento da allowlist (cadastro de
   usuário é manual, direto no banco, por ora)
-- IA além do já implementado (ver seção "Extração (mock) de dados da
-  receita" acima): copilot de busca, identificação de cliente por imagem,
-  recomendação de lente — nenhum real, nenhum mockado ainda; ver "Fase
-  Futura"
+- IA/LLM real além do já implementado (ver "Extração (mock) de dados da
+  receita" e "Agente (mock)" acima) — as duas features existentes são mock;
+  identificação de cliente por imagem e recomendação de lente seguem sem
+  nenhuma implementação, nem mock; ver "Fase Futura"
 - Deploy em Lambda/API Gateway/DynamoDB/S3 (Docker Compose local é suficiente
   por ora; migração AWS é próxima fase)
 
@@ -242,12 +263,16 @@ parametrizável por role pra não precisar refatorar depois.
 Fica registrado aqui pra não se perder a decisão, sem gerar código ou tela
 nesta fase:
 
-1. **Copilot de busca textual** — consulta em linguagem natural sobre
-   clientes/receitas ("receitas da Maria vencendo esse mês"), via
-   RAG/tool-calling sobre o banco.
+1. **Copilot de busca textual com LLM real** — a experiência já foi
+   *explorada via mock* na feature "Agente" (ver Endpoints acima): chat que
+   cadastra/edita/busca clientes, com tools reais no banco e contrato de API
+   já desenhado (`AgenteRequest`/`AgenteResponse` em `app/schemas/agente.py`).
+   O que falta é só trocar a interpretação — hoje por correspondência exata
+   contra um catálogo fixo de frases, no futuro por tool-calling de um LLM de
+   verdade — e destravar o campo de texto livre no frontend
+   (`frontend/src/pages/Agente.jsx`). Contrato de API e execução das tools
+   não mudam.
 2. **Identificação de cliente por imagem** — upload de receita sem cliente
    pré-selecionado; modelo multimodal lê a imagem e chama uma tool de busca
-   pra encontrar o cliente correspondente.
-
-Nenhum dos dois tem contrato de API definido ainda — isso fica pra quando
-essa fase entrar em planejamento de verdade.
+   pra encontrar o cliente correspondente. Ainda sem contrato de API nem
+   mock — fica pra quando essa fase entrar em planejamento de verdade.
