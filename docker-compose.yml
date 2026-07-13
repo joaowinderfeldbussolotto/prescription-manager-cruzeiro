@@ -68,6 +68,9 @@ services:
       DEV_AUTH_ENABLED: ${DEV_AUTH_ENABLED:-true}
       EXTRACAO_IA_ENABLED: ${EXTRACAO_IA_ENABLED:-true}
       AGENTE_ENABLED: ${AGENTE_ENABLED:-true}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL_PRIMARY: ${GROQ_MODEL_PRIMARY:-openai/gpt-oss-120b}
+      GROQ_MODEL_FALLBACKS: ${GROQ_MODEL_FALLBACKS:-openai/gpt-oss-20b}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@example.com}
       S3_ENDPOINT_INTERNAL: http://minio:9000
       S3_ENDPOINT_PUBLIC: ${S3_ENDPOINT_PUBLIC:-http://localhost:9000}

@@ -5,9 +5,11 @@ Réplica moderna de um sistema originalmente feito em Oracle APEX para a
 ópticas** associadas a cada um. Escopo atual: apenas o módulo óptico (cliente +
 receita) + autenticação.
 
-> **Sem IA nesta fase.** O sistema é CRUD puro. A visão de copilot (busca em
-> linguagem natural, identificação de cliente por imagem) está registrada
-> apenas como intenção na [`SPEC.md`](./SPEC.md), sem código nem tela.
+> O núcleo é CRUD de clientes e receitas ópticas. Além dele, a aba
+> **Agente** já tem IA real (LangChain + Groq, tools sobre o banco — ver
+> "Fluxo 7: Agente" no Manual de Uso); a extração de dados de receita por
+> imagem continua mock. Identificação de cliente por imagem segue só como
+> intenção na [`SPEC.md`](./SPEC.md), sem código nem tela.
 
 ---
 
@@ -21,6 +23,8 @@ A instância EC2 (t2.micro) está **rodando, mas sem HTTPS nem Google OAuth**:
   - Login: qualquer e-mail na allowlist (default: `admin@example.com`)
   - Sem suporte a Google OAuth neste momento (requer HTTPS)
 - **Banco/Storage**: MongoDB e MinIO rodando containerizados na instância
+- **Agente**: indisponível até configurar `GROQ_API_KEY` manualmente no `.env`
+  da instância (chave real de console.groq.com) e reiniciar (`docker compose up -d`)
 - **Custo**: ~US$10/mês (ou perto de zero no Free Tier)
 
 **Pra usar em produção real**, você vai precisar:
@@ -407,42 +411,55 @@ Ao fazer login, 3 métricas:
 2. **Receitas neste mês** (contagem por `data_cadastro`)
 3. **Receitas vencendo em 30 dias** (validade entre hoje e hoje+30d)
 
-### Fluxo 7: Agente (chat em linguagem natural — mock)
+### Fluxo 7: Agente (chat em linguagem natural)
 
-Aba **Agente**: um chat onde o usuário cadastra, edita e busca clientes
-conversando, ao invés de preencher formulários. Ex: "Cadastra a cliente Maria
-Souza, CPF 111.222.333-44…" ou "Busca as receitas da Maria Souza".
+Aba **Agente**: converse livremente com o **Assistente Virtual da Cruzeiro**
+pra cadastrar, editar e buscar clientes e receitas, em vez de preencher
+formulários. Ex: "Cadastra a Maria Souza, CPF 111.222.333-44, telefone (48)
+99911-2233" ou "Busca as receitas da Maria Souza". Aceita texto livre; os
+chips de sugestão na tela são só atalhos rápidos pra explorar o que o
+agente sabe fazer.
 
-**Decisão de design importante: a interpretação da frase é mock, mas as
-ações no banco são reais.** Não há LLM nesta fase — e, como o frontend **só
-oferece frases fixas** (chips de sugestão, sem texto livre), o backend não
-precisa de NLU nem de regex pra extrair intenção e dados: ele faz uma
-**correspondência exata** entre a mensagem recebida e uma tabela de cenários
-conhecidos (`CENARIOS_MOCK` em `backend/app/schemas/agente.py`), cada um já
-com o *intent* e os argumentos que a tool precisa. **A partir daí, a
-execução é 100% real** — reusa os mesmos repositórios de `routers/clientes.py`
-(`cliente_repo.create/update/list_paginated`): cadastra clientes de verdade,
-atualiza telefone de verdade, e os links retornados abrem clientes reais com
-os dados carregados. Se a busca por nome for ambígua (mais de um cliente
-encontrado), o agente devolve **um link para cada um**, ao invés de adivinhar.
+**Arquitetura**: agente real via [LangChain](https://python.langchain.com)
+(`create_agent`), modelo primário Groq `openai/gpt-oss-120b` iniciado via
+`init_chat_model`, com `ModelFallbackMiddleware` pra `openai/gpt-oss-20b`
+em caso de erro do modelo primário (ver `backend/app/agent/service.py`).
 
-Por que exact match em vez de regex/heurística de linguagem: eliminar de vez
-os edge cases de parsing (acentuação, ordem das palavras, nomes compostos)
-sem esconder a mecânica real do fluxo — a tabela de cenários **é** o
-contrato de intent + argumentos que um LLM real produziria a partir de texto
-livre; hoje ela é preenchida à mão porque as frases de entrada já são
-conhecidas de antemão (são os próprios chips do frontend).
-
-**O que muda quando um LLM real entrar** (fora de escopo agora): só a
-função `interpretar_mensagem` — troca o lookup na tabela por uma chamada ao
-modelo com tool-calling, produzindo o mesmo formato de saída (`intent` +
-`argumentos`). O contrato de request/response da API, a execução das tools
-no banco e a UI do chat **não mudam**. O campo de texto do chat já existe na
-tela, mas fica desabilitado — sinalizando que o texto livre é o próximo
-passo, não uma reescrita de tela.
+- **Tools bem definidas, não uma query genérica** (`backend/app/agent/tools.py`):
+  `cadastrar_cliente`, `editar_cliente`, `buscar_cliente`,
+  `buscar_receitas_cliente`, `preparar_receita` — cada uma reusa os mesmos
+  repositórios de `routers/clientes.py` (`cliente_repo`/`receita_repo`), batendo
+  no banco de verdade. As **instruções de uso de cada capability ficam na
+  description da própria tool** (não no prompt) — é isso que o modelo lê pra
+  decidir quando e como chamar cada uma, incluindo o protocolo de
+  desambiguação (se a busca por nome encontrar mais de um cliente, o agente
+  lista todos e pergunta qual é, em vez de adivinhar).
+- **Prompt do sistema em arquivo externo** (`backend/app/agent/prompts/system_prompt.md`),
+  não uma string no código — carrega só a identidade do agente e regras
+  gerais válidas pra toda a conversa (idioma, nunca inventar dado, etc.); as
+  instruções operacionais ficam nas tools, como descrito acima.
+- **Memória multi-turn**: histórico de conversa por usuário via checkpointer
+  do LangGraph (`langgraph-checkpoint-mongodb`, `MongoDBSaver`), reusando o
+  MongoDB que o app já roda — dá pra perguntar "e o telefone dela?" depois de
+  cadastrar um cliente sem repetir o nome. Expira sozinho depois de alguns
+  dias (TTL do índice do Mongo).
+- **Links clicáveis**: em vez de um campo estruturado à parte, cada tool
+  instrui o modelo a incluir um link markdown (`[Nome](/clientes/ID)`) na
+  resposta quando relevante; o frontend faz o parse desse padrão e renderiza
+  como link de verdade. A informação sempre aparece em texto simples também
+  — o link é um bônus de navegação, nunca o único jeito de saber o que
+  aconteceu (o fallback ao modelo menor tende a seguir formatação pior que o
+  principal).
 
 **Toggle:** `AGENTE_ENABLED=false` no `.env` esconde a aba e desliga o
-endpoint (404).
+endpoint (404). Sem `GROQ_API_KEY` configurada, o endpoint também fica
+indisponível (404), mesmo com o toggle ligado.
+
+**Limitações conhecidas**: o fallback só cobre outro modelo do Groq (não uma
+queda do Groq inteiro); rate limit do Groq no tier grátis é baixo e cada
+turno do agente pode custar 2-4 chamadas ao modelo (tool-calling) — erros
+viram uma resposta amigável no chat, não um 500; não há botão de "nova
+conversa" ainda (a memória é um thread contínuo por usuário).
 
 ### Features Principais
 
@@ -477,8 +494,8 @@ Feature toggle: `EXTRACAO_IA_ENABLED` (env)
 | **CPF formato apenas** | Validação mínima; dígito verificador fica pra depois. |
 | **Presigned URLs curtas** | Segurança; URL compartilhada após expiração não funciona. |
 | **Feature toggles via `.env`** | Ativa/desativa IA, dev auth, Google, Agente sem redeploy. |
-| **Agente por sugestões fixas** | Sem texto livre ainda; catálogo de frases exercitando cada caso de uso. |
-| **Interpretação do Agente por exact match** | Sem regex/NLU nesta fase; tools que ele aciona são reais no banco. |
+| **Tools do Agente com instrução na description** | O prompt fica magro; cada capability carrega sua própria instrução de uso. |
+| **Fallback só entre modelos Groq** | Não cobre queda do provedor inteiro — risco aceito dado o escopo. |
 
 ### Configuração por Feature
 
@@ -489,17 +506,17 @@ Edite `.env` e restarte (`docker compose up -d`):
 | `DEV_AUTH_ENABLED` | `true` | Botão de login simples |
 | `GOOGLE_CLIENT_ID` | vazio | Botão "Entrar com Google" |
 | `EXTRACAO_IA_ENABLED` | `true` | Botão "Preencher com IA" |
-| `AGENTE_ENABLED` | `true` | Aba "Agente" (chat mock) |
+| `AGENTE_ENABLED` | `true` | Aba "Agente" (chat) |
+| `GROQ_API_KEY` | vazio | Chave da API do Groq — sem ela, o Agente fica indisponível (404) |
+| `GROQ_MODEL_PRIMARY` | `openai/gpt-oss-120b` | Modelo primário do Agente |
+| `GROQ_MODEL_FALLBACKS` | `openai/gpt-oss-20b` | Modelo(s) de fallback, separados por vírgula |
 | `COOKIE_SECURE` | `false` | Cookie só funciona com HTTPS se `true` |
 | `CORS_ORIGINS` | `http://localhost:*` | Origins autorizadas pra CORS |
 
 ### Próximos Passos (Road Map)
 
 - **IA real (extração de receita)**: substitua o mock em `backend/app/schemas/extracao.py`. UI não muda.
-- **LLM real (Agente)**: substitua o lookup por exact match em
-  `interpretar_mensagem` (`backend/app/schemas/agente.py`) por tool-calling
-  de um modelo de verdade, e destrave o campo de texto livre em
-  `frontend/src/pages/Agente.jsx`. Contrato de API e execução das tools não mudam.
+- **Botão de "nova conversa" no Agente**: hoje a memória é um thread contínuo por usuário (sem reset).
 - **S3 real**: mude `S3_ENDPOINT_*` pra bucket AWS. Código não muda.
 - **Google OAuth**: registre Client ID no Google Cloud Console.
 - **Módulo de relojoaria**: estrutura pronta, fora de escopo.
@@ -511,5 +528,7 @@ Edite `.env` e restarte (`docker compose up -d`):
 
 - Módulo de relojoaria / ordem de serviço
 - Autoregistro de usuário e tela de gestão da allowlist
-- Qualquer componente de IA (real ou mockado) — ver "Fase Futura" na `SPEC.md`
+- Extração de dados de receita por imagem continua mock (o Agente de chat já
+  é real — ver "Fluxo 7: Agente" no Manual de Uso); identificação de cliente
+  por imagem segue só como intenção — ver "Fase Futura" na `SPEC.md`
 - Deploy em Lambda/API Gateway/DynamoDB/S3

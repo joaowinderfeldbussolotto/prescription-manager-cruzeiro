@@ -1,21 +1,30 @@
-"""Testes do endpoint do Agente (mock).
+"""Testes do endpoint do Agente (agora um agente LangChain real).
 
-A interpretação da mensagem é por correspondência exata (`CENARIOS_MOCK` em
-`app/schemas/agente.py`) — os testes usam as próprias chaves desse dicionário
-como payload, pra não duplicar (e não deixar dessincronizar) o texto exato das
-mensagens.
-
-As TOOLS que o router aciona são monkeypatchadas em `app.routers.agente.
-cliente_repo` (mesmo módulo usado por `routers/clientes.py`) — não batemos
-num Mongo real, só isolamos o roteamento intent -> tool.
+Duas camadas:
+1. Testes de ROUTER (401/404/200) via `TestClient`, com `agent_service`
+   monkeypatchado — não fazem nenhuma chamada de rede real ao Groq.
+2. Um teste de FIAÇÃO que monta um `create_agent` de verdade com as tools e
+   o prompt reais do projeto, mas usando um chat model fake (determinístico,
+   sem rede) e um checkpointer em memória — pega erro de schema de tool ou
+   de prompt ausente/mal formatado sem precisar de GROQ_API_KEY nem de
+   Mongo real (a tool ainda roda de verdade; sem Mongo conectado, o
+   try/except da tool devolve uma string de erro, exercitando esse caminho).
 """
+from __future__ import annotations
+
 from fastapi.testclient import TestClient
+from langchain.agents import create_agent
+from langchain_core.language_models import FakeMessagesListChatModel
+from langchain_core.messages import AIMessage
+from langgraph.checkpoint.memory import MemorySaver
 
 import app.routers.agente as agente_router
+from app.agent import service as agent_service
+from app.agent.service import _SYSTEM_PROMPT
+from app.agent.tools import TOOLS
 from app.auth.dependencies import get_current_user
 from app.config import settings
 from app.main import app
-from app.schemas.agente import CENARIOS_MOCK
 
 client = TestClient(app)
 
@@ -27,11 +36,6 @@ FAKE_USER = {
     "ativo": True,
 }
 
-MSG_CADASTRAR = "Cadastra a cliente Maria Souza, CPF 111.222.333-44, telefone (48) 99911-2233, nascida em 12/04/1990"
-MSG_EDITAR = "Atualiza o telefone da Maria Souza para (48) 3333-0000"
-MSG_BUSCAR = "Busca a cliente Maria"
-MSG_PREPARAR_RECEITA = "Prepara uma receita para a Maria Souza"
-
 
 def _authenticate():
     app.dependency_overrides[get_current_user] = lambda: FAKE_USER
@@ -41,23 +45,11 @@ def _clear_auth_override():
     app.dependency_overrides.pop(get_current_user, None)
 
 
-def _fake_get_db(monkeypatch):
-    # `agente.py` chama `get_db()` diretamente (não é Depends do FastAPI);
-    # nos testes não há Mongo real conectado, então isolamos com um sentinel —
-    # as funções de cliente_repo usadas nele são monkeypatchadas em cada
-    # teste e ignoram o valor de fato.
-    monkeypatch.setattr(agente_router, "get_db", lambda: object())
-
-
-def test_todas_as_mensagens_de_teste_existem_no_catalogo():
-    # garante que os literais usados neste arquivo não dessincronizaram do
-    # catálogo real que o frontend também usa como chips de sugestão
-    for msg in (MSG_CADASTRAR, MSG_EDITAR, MSG_BUSCAR, MSG_PREPARAR_RECEITA):
-        assert msg in CENARIOS_MOCK
+# --- Router ----------------------------------------------------------------
 
 
 def test_agente_sem_sessao_401():
-    r = client.post("/api/agente/mensagem", json={"mensagem": MSG_BUSCAR})
+    r = client.post("/api/agente/mensagem", json={"mensagem": "oi"})
     assert r.status_code == 401
 
 
@@ -65,143 +57,107 @@ def test_agente_toggle_desligado_404(monkeypatch):
     _authenticate()
     try:
         monkeypatch.setattr(settings, "agente_enabled", False)
-        r = client.post("/api/agente/mensagem", json={"mensagem": MSG_BUSCAR})
+        r = client.post("/api/agente/mensagem", json={"mensagem": "oi"})
         assert r.status_code == 404
     finally:
         _clear_auth_override()
 
 
-def test_mensagem_desconhecida_nao_bate_nenhum_cenario():
+def test_agente_sem_groq_configurado_404(monkeypatch):
     _authenticate()
     try:
-        r = client.post("/api/agente/mensagem", json={"mensagem": "Isso aqui não está no catálogo"})
-        assert r.status_code == 200
-        body = r.json()
-        assert body["mock"] is True
-        assert body["acoes"] == []
-        assert body["links"] == []
+        monkeypatch.setattr(agente_router.agent_service, "AGENT", None)
+        r = client.post("/api/agente/mensagem", json={"mensagem": "oi"})
+        assert r.status_code == 404
     finally:
         _clear_auth_override()
 
 
-def test_cadastrar_cliente_chama_tool_real(monkeypatch):
+def test_agente_happy_path_chama_o_agente(monkeypatch):
     _authenticate()
     try:
-        _fake_get_db(monkeypatch)
-        criado = {"id": "665aaa", "nome": "Maria Souza", "telefone": "(48) 99911-2233"}
+        chamadas = []
 
-        async def fake_create(db, data):
-            assert data["nome"] == "Maria Souza"
-            assert data["cpf"] == "111.222.333-44"
-            return criado
+        async def fake_enviar_mensagem(mensagem: str, *, thread_id: str) -> str:
+            chamadas.append((mensagem, thread_id))
+            return "Pronto! Cadastrei a Maria Souza. [Maria Souza](/clientes/665aaa)"
 
-        monkeypatch.setattr(agente_router.cliente_repo, "create", fake_create)
-        r = client.post("/api/agente/mensagem", json={"mensagem": MSG_CADASTRAR})
+        monkeypatch.setattr(agente_router.agent_service, "AGENT", object())
+        monkeypatch.setattr(agente_router.agent_service, "enviar_mensagem", fake_enviar_mensagem)
+
+        r = client.post("/api/agente/mensagem", json={"mensagem": "Cadastra a Maria Souza"})
         assert r.status_code == 200
         body = r.json()
-        assert body["mock"] is True
-        assert body["acoes"][0]["tool"] == "cadastrar_cliente"
-        assert body["links"][0]["href"] == "/clientes/665aaa"
+        assert body == {"resposta": "Pronto! Cadastrei a Maria Souza. [Maria Souza](/clientes/665aaa)"}
+        assert chamadas == [("Cadastra a Maria Souza", FAKE_USER["id"])]
     finally:
         _clear_auth_override()
 
 
-def test_editar_cliente_atualiza_telefone(monkeypatch):
+def test_agente_mensagem_vazia_422():
     _authenticate()
     try:
-        _fake_get_db(monkeypatch)
-        encontrado = {"id": "665bbb", "nome": "Maria Souza", "telefone": "(48) 99911-2233"}
-        atualizado = {"id": "665bbb", "nome": "Maria Souza", "telefone": "(48) 3333-0000"}
-
-        async def fake_list_paginated(db, *, busca, page, limit):
-            assert busca == "Maria Souza"
-            return [encontrado], 1
-
-        async def fake_update(db, cliente_id, data):
-            assert cliente_id == "665bbb"
-            assert data == {"telefone": "(48) 3333-0000"}
-            return atualizado
-
-        monkeypatch.setattr(agente_router.cliente_repo, "list_paginated", fake_list_paginated)
-        monkeypatch.setattr(agente_router.cliente_repo, "update", fake_update)
-        r = client.post("/api/agente/mensagem", json={"mensagem": MSG_EDITAR})
-        assert r.status_code == 200
-        body = r.json()
-        assert body["acoes"][0]["tool"] == "editar_cliente"
-        assert body["links"][0]["href"] == "/clientes/665bbb"
+        r = client.post("/api/agente/mensagem", json={"mensagem": ""})
+        assert r.status_code == 422
     finally:
         _clear_auth_override()
 
 
-def test_buscar_cliente_ambiguo_retorna_varios_links(monkeypatch):
-    _authenticate()
-    try:
-        _fake_get_db(monkeypatch)
-        encontrados = [
-            {"id": "1", "nome": "Maria Souza", "telefone": "x"},
-            {"id": "2", "nome": "Maria Oliveira", "telefone": "y"},
+# --- Fiação (agente real, modelo fake, sem rede/Mongo) ----------------------
+
+
+class _FakeToolCallingModel(FakeMessagesListChatModel):
+    """Fake chat model que sobrescreve `bind_tools` (a base de langchain_core
+    levanta NotImplementedError, já que normalmente cada provider real
+    traduz o schema da tool pro seu próprio formato de API)."""
+
+    def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+        return self
+
+
+def test_fiacao_agente_real_com_modelo_fake():
+    """Monta create_agent com as TOOLS e o system_prompt reais do projeto —
+    pega erro de schema de tool quebrado ou prompt ausente/mal formatado sem
+    precisar de GROQ_API_KEY nem de Mongo real."""
+    fake_model = _FakeToolCallingModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "buscar_cliente",
+                        "args": {"termo": "Maria"},
+                        "id": "call_1",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="Não encontrei ninguém com esse nome."),
         ]
+    )
 
-        async def fake_list_paginated(db, *, busca, page, limit):
-            return encontrados, len(encontrados)
+    agent = create_agent(
+        model=fake_model,
+        tools=TOOLS,
+        system_prompt=_SYSTEM_PROMPT,
+        checkpointer=MemorySaver(),
+    )
 
-        monkeypatch.setattr(agente_router.cliente_repo, "list_paginated", fake_list_paginated)
-        r = client.post("/api/agente/mensagem", json={"mensagem": MSG_BUSCAR})
-        assert r.status_code == 200
-        body = r.json()
-        assert len(body["links"]) == 2
-    finally:
-        _clear_auth_override()
+    import asyncio
 
+    async def _run():
+        return await agent.ainvoke(
+            {"messages": [{"role": "user", "content": "busca a Maria"}]},
+            config={"configurable": {"thread_id": "wiring-test"}, "recursion_limit": 12},
+        )
 
-def test_buscar_cliente_unico_retorna_um_link(monkeypatch):
-    _authenticate()
-    try:
-        _fake_get_db(monkeypatch)
-        encontrado = [{"id": "665ccc", "nome": "Maria Souza", "telefone": "x"}]
+    resultado = asyncio.run(_run())
+    mensagens = resultado["messages"]
 
-        async def fake_list_paginated(db, *, busca, page, limit):
-            return encontrado, 1
+    # A tool real rodou (sem Mongo conectado nesse processo de teste, o
+    # try/except dela devolveu uma string de erro em vez de derrubar o turno).
+    tool_messages = [m for m in mensagens if m.type == "tool"]
+    assert len(tool_messages) == 1
+    assert "Erro ao buscar cliente" in tool_messages[0].content
 
-        monkeypatch.setattr(agente_router.cliente_repo, "list_paginated", fake_list_paginated)
-        r = client.post("/api/agente/mensagem", json={"mensagem": MSG_BUSCAR})
-        assert r.status_code == 200
-        body = r.json()
-        assert len(body["links"]) == 1
-        assert body["links"][0]["href"] == "/clientes/665ccc"
-    finally:
-        _clear_auth_override()
-
-
-def test_buscar_cliente_sem_resultado(monkeypatch):
-    _authenticate()
-    try:
-        _fake_get_db(monkeypatch)
-        async def fake_list_paginated(db, *, busca, page, limit):
-            return [], 0
-
-        monkeypatch.setattr(agente_router.cliente_repo, "list_paginated", fake_list_paginated)
-        r = client.post("/api/agente/mensagem", json={"mensagem": MSG_BUSCAR})
-        assert r.status_code == 200
-        body = r.json()
-        assert body["links"] == []
-    finally:
-        _clear_auth_override()
-
-
-def test_preparar_receita_hand_off_para_formulario(monkeypatch):
-    _authenticate()
-    try:
-        _fake_get_db(monkeypatch)
-        encontrado = [{"id": "665ddd", "nome": "Maria Souza", "telefone": "x"}]
-
-        async def fake_list_paginated(db, *, busca, page, limit):
-            return encontrado, 1
-
-        monkeypatch.setattr(agente_router.cliente_repo, "list_paginated", fake_list_paginated)
-        r = client.post("/api/agente/mensagem", json={"mensagem": MSG_PREPARAR_RECEITA})
-        assert r.status_code == 200
-        body = r.json()
-        assert body["links"][0]["href"] == "/clientes/665ddd/receitas/nova"
-    finally:
-        _clear_auth_override()
+    assert mensagens[-1].content == "Não encontrei ninguém com esse nome."

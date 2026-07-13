@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent import service as agent_service
 from app.config import settings
 from app.db import mongo
 from app.models import usuario as usuario_repo
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("%s pronta (env=%s)", settings.app_name, settings.environment)
     yield
+    agent_service.close()
     await mongo.close()
 
 

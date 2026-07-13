@@ -88,16 +88,30 @@ class Settings(BaseSettings):
     # (ainda não há chamada de IA real nenhuma).
     extracao_ia_enabled: bool = True
 
-    # --- Features (Agente mock) ------------------------------------------
-    # Liga/desliga a aba "Agente" (chat com agente de linguagem natural mock;
-    # tools reais no banco — ver app/schemas/agente.py). O toggle existe pra
-    # poder esconder a feature sem redeploy de código, sem relação com custo
-    # de LLM real (ainda não há chamada de LLM real nenhuma).
+    # --- Features (Agente) ------------------------------------------------
+    # Liga/desliga a aba "Agente" (chat com agente de linguagem natural real
+    # via LangChain/Groq — ver app/agent/). O toggle existe pra poder
+    # esconder a feature sem redeploy de código.
     agente_enabled: bool = True
+
+    # --- Agente (LLM real via Groq) ---------------------------------------
+    # Chave da API do Groq (console.groq.com). Sem ela, o agente fica
+    # indisponível (404) mesmo com agente_enabled=true — ver app/agent/service.py.
+    groq_api_key: str | None = None
+    # Modelo primário, iniciado via langchain.chat_models.init_chat_model.
+    groq_model_primary: str = "openai/gpt-oss-120b"
+    # Fallback (ModelFallbackMiddleware), acionado em erro do modelo primário.
+    # Lista separada por vírgula — configurável sem mudar código caso o
+    # catálogo de modelos do Groq mude.
+    groq_model_fallbacks: str = "openai/gpt-oss-20b"
 
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def groq_model_fallbacks_list(self) -> list[str]:
+        return [m.strip() for m in self.groq_model_fallbacks.split(",") if m.strip()]
 
 
 @lru_cache
