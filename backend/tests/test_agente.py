@@ -114,6 +114,51 @@ def test_prompt_local_sem_langfuse_configurado():
     assert texto == _SYSTEM_PROMPT
 
 
+def test_prompt_do_langfuse_nunca_vai_pro_metadata_do_checkpoint(monkeypatch):
+    """Regressão: colocar o objeto do prompt do Langfuse (TextPromptClient)
+    em `config["metadata"]` quebra a serialização msgpack do checkpoint no
+    Mongo assim que o agente tenta salvar (visto em produção: `TypeError:
+    Type is not msgpack serializable: TextPromptClient` — o LangGraph
+    mescla `config["metadata"]` no CheckpointMetadata persistido pelo
+    MongoDBSaver). A associação do prompt precisa ir por
+    `update_current_generation(prompt=...)`, nunca pelo `config` do
+    `.ainvoke()`."""
+
+    class FakePromptObj:
+        """Qualquer classe custom não-primitiva reproduz o bug — não
+        precisa ser um TextPromptClient de verdade."""
+
+    class FakeLangfuseClient:
+        def __init__(self):
+            self.update_current_generation_chamado_com = None
+
+        def update_current_generation(self, *, prompt):
+            self.update_current_generation_chamado_com = prompt
+
+    class FakeAgent:
+        def __init__(self):
+            self.config_recebido = None
+
+        async def ainvoke(self, state, config):
+            self.config_recebido = config
+            return {"messages": [type("M", (), {"content": "ok"})()]}
+
+    fake_prompt = FakePromptObj()
+    fake_client = FakeLangfuseClient()
+    fake_agent = FakeAgent()
+
+    monkeypatch.setattr(agent_service, "_LANGFUSE_PROMPT_OBJ", fake_prompt)
+    monkeypatch.setattr(agent_service, "_langfuse_client", fake_client)
+    monkeypatch.setattr(agent_service, "AGENT", fake_agent)
+
+    import asyncio
+
+    asyncio.run(agent_service._enviar_mensagem_raw("oi", thread_id="t1"))
+
+    assert "metadata" not in fake_agent.config_recebido
+    assert fake_client.update_current_generation_chamado_com is fake_prompt
+
+
 # --- Fiação (agente real, modelo fake, sem rede/Mongo) ----------------------
 
 

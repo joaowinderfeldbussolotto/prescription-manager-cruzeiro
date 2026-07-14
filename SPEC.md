@@ -233,10 +233,16 @@ parametrizável por role pra não precisar refatorar depois.
     ser buscado via `get_prompt(LANGFUSE_PROMPT_NAME, fallback=<texto local>)`
     — se Langfuse não estiver configurado ou a busca falhar, usa o
     `fallback` nativo do SDK (o conteúdo de `system_prompt.md`), sem
-    derrubar o agente. O objeto do prompt retornado é anexado a cada trace
-    via `config={"metadata": {"langfuse_prompt": prompt}}`, associando a
-    versão exata usada. Precisa de um "Text Prompt" com esse nome criado
-    manualmente no dashboard do Langfuse antes de existir lá.
+    derrubar o agente. O objeto do prompt é associado à geração via
+    `update_current_generation(prompt=...)` dentro de um span aberto por
+    `@observe()` — **não** via `config={"metadata": {"langfuse_prompt": ...}}`
+    (esse padrão, documentado pra chains simples do LangChain, quebra a
+    serialização msgpack do checkpoint quando há um checkpointer persistente
+    como o `MongoDBSaver`: o LangGraph mescla `config["metadata"]` no
+    `CheckpointMetadata` salvo a cada checkpoint, e o objeto do prompt não é
+    um tipo primitivo — bug real visto em produção, corrigido). Precisa de
+    um "Text Prompt" com esse nome criado manualmente no dashboard do
+    Langfuse antes de existir lá.
   - **Links**: cada tool instrui o modelo a incluir `[Nome](/clientes/ID)`
     na resposta quando relevante; o frontend faz o parse desse padrão
     markdown. A informação sempre aparece em texto simples também (o link é

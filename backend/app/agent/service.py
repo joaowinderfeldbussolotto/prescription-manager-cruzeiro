@@ -63,15 +63,30 @@ if settings.langfuse_secret_key and settings.langfuse_public_key:
 else:
     logger.info("Langfuse não configurado — Agente seguirá sem tracing")
 
+# NUNCA colocar `_LANGFUSE_PROMPT_OBJ` (um TextPromptClient) dentro do
+# `metadata` passado pro `.ainvoke()` do agente: o LangGraph mescla esse
+# dict no CheckpointMetadata que o MongoDBSaver persiste a cada checkpoint,
+# serializando via msgpack — e TextPromptClient não é um tipo primitivo
+# (`TypeError: Type is not msgpack serializable`, visto em produção). Esse
+# padrão (`config={"metadata": {"langfuse_prompt": prompt}}`) só é seguro
+# em chains simples do LangChain sem checkpointer — o próprio time do
+# Langfuse confirma que ainda não há suporte limpo pra isso com LangGraph
+# (github.com/orgs/langfuse/discussions/11825). Em vez disso, associamos o
+# prompt à GERAÇÃO ativa via `update_current_generation(prompt=...)`, que
+# fala com o Langfuse direto pela API do SDK, sem passar pelo estado
+# persistido do LangGraph — só funciona dentro de um span já aberto por
+# `@observe()` (ver `enviar_mensagem` abaixo).
+
 
 def _load_system_prompt() -> tuple[str, object | None]:
     """Busca o prompt do Langfuse (Prompt Management); cai pro arquivo local
     se Langfuse não estiver configurado ou a busca falhar.
 
     Retorna ``(texto_do_prompt, objeto_do_prompt_ou_None)`` — o objeto (só
-    presente quando veio do Langfuse) é anexado a cada trace via
-    ``metadata={"langfuse_prompt": ...}`` em `enviar_mensagem`, associando a
-    versão exata do prompt usada a cada geração no dashboard.
+    presente quando veio do Langfuse) é associado a cada geração via
+    ``update_current_generation(prompt=...)`` em `enviar_mensagem` (NUNCA via
+    ``config["metadata"]``: ver comentário lá — isso quebra a serialização
+    do checkpoint no Mongo).
     """
     local_text = _PROMPT_PATH.read_text(encoding="utf-8")
     if _langfuse_client is None:
@@ -140,7 +155,7 @@ else:
     logger.info("GROQ_API_KEY não configurada — aba Agente ficará indisponível (404)")
 
 
-async def enviar_mensagem(mensagem: str, *, thread_id: str) -> str:
+async def _enviar_mensagem_raw(mensagem: str, *, thread_id: str) -> str:
     """Envia uma mensagem ao agente e devolve o texto da resposta final.
 
     Nunca levanta exceção — falhas (rate limit do Groq, timeout, erro de
@@ -149,14 +164,18 @@ async def enviar_mensagem(mensagem: str, *, thread_id: str) -> str:
     """
     assert AGENT is not None, "enviar_mensagem chamado sem o agente montado"
 
+    if _langfuse_client is not None and _LANGFUSE_PROMPT_OBJ is not None:
+        try:
+            _langfuse_client.update_current_generation(prompt=_LANGFUSE_PROMPT_OBJ)
+        except Exception:
+            logger.exception("Falha ao associar prompt ao trace do Langfuse")
+
     config: dict = {
         "configurable": {"thread_id": thread_id},
         "recursion_limit": _RECURSION_LIMIT,
     }
     if _langfuse_handler is not None:
         config["callbacks"] = [_langfuse_handler]
-    if _LANGFUSE_PROMPT_OBJ is not None:
-        config["metadata"] = {"langfuse_prompt": _LANGFUSE_PROMPT_OBJ}
 
     try:
         resultado = await asyncio.wait_for(
@@ -167,6 +186,19 @@ async def enviar_mensagem(mensagem: str, *, thread_id: str) -> str:
     except Exception:
         logger.exception("Falha ao invocar o agente")
         return _MENSAGEM_ERRO
+
+
+if _langfuse_handler is not None:
+    # @observe() abre o span/trace que dá contexto pro
+    # update_current_generation() acima conseguir associar o prompt — sem
+    # isso não haveria "geração ativa" pra atualizar. Só decora de verdade
+    # quando o Langfuse está configurado (senão o SDK loga um aviso de
+    # "client initialized without public_key" a cada chamada à toa).
+    from langfuse import observe
+
+    enviar_mensagem = observe(name="agente-mensagem", as_type="generation")(_enviar_mensagem_raw)
+else:
+    enviar_mensagem = _enviar_mensagem_raw
 
 
 def close() -> None:
