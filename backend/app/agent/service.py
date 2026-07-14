@@ -4,6 +4,10 @@ Construído uma única vez, na importação deste módulo (mesmo padrão de
 `settings = get_settings()` em `app/config.py`) — SE `GROQ_API_KEY` estiver
 configurada; caso contrário `AGENT` fica `None` e o router trata isso como
 feature indisponível (mesmo padrão dos outros toggles do projeto: 404).
+
+Observabilidade (Langfuse) é opcional e aditiva: sem `LANGFUSE_SECRET_KEY`/
+`LANGFUSE_PUBLIC_KEY` configuradas, o agente funciona igual, só sem tracing
+e usando o prompt local em vez do gerenciado no Langfuse.
 """
 from __future__ import annotations
 
@@ -23,7 +27,6 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "system_prompt.md"
-_SYSTEM_PROMPT = _PROMPT_PATH.read_text(encoding="utf-8")
 
 # create_agent não limita mais a recursão por padrão (usa um teto interno
 # bem alto) — sem isso, uma tool que falha repetidamente pendura a request.
@@ -37,6 +40,56 @@ _MENSAGEM_ERRO = (
 
 _sync_client: MongoClient | None = None
 AGENT = None
+
+# --- Langfuse (tracing + prompt management) — opcional, aditivo -------------
+_langfuse_client = None
+_langfuse_handler = None
+
+if settings.langfuse_secret_key and settings.langfuse_public_key:
+    try:
+        from langfuse import get_client
+        from langfuse.langchain import CallbackHandler
+
+        # get_client()/CallbackHandler() leem LANGFUSE_SECRET_KEY/
+        # LANGFUSE_PUBLIC_KEY/LANGFUSE_BASE_URL direto do ambiente do
+        # processo (o docker-compose já injeta essas variáveis no
+        # container) — não repassamos as settings manualmente pro SDK.
+        _langfuse_client = get_client()
+        _langfuse_handler = CallbackHandler()
+    except Exception:
+        logger.exception("Falha ao inicializar Langfuse — seguindo sem tracing")
+        _langfuse_client = None
+        _langfuse_handler = None
+else:
+    logger.info("Langfuse não configurado — Agente seguirá sem tracing")
+
+
+def _load_system_prompt() -> tuple[str, object | None]:
+    """Busca o prompt do Langfuse (Prompt Management); cai pro arquivo local
+    se Langfuse não estiver configurado ou a busca falhar.
+
+    Retorna ``(texto_do_prompt, objeto_do_prompt_ou_None)`` — o objeto (só
+    presente quando veio do Langfuse) é anexado a cada trace via
+    ``metadata={"langfuse_prompt": ...}`` em `enviar_mensagem`, associando a
+    versão exata do prompt usada a cada geração no dashboard.
+    """
+    local_text = _PROMPT_PATH.read_text(encoding="utf-8")
+    if _langfuse_client is None:
+        return local_text, None
+
+    try:
+        prompt_obj = _langfuse_client.get_prompt(
+            settings.langfuse_prompt_name,
+            fallback=local_text,
+            fetch_timeout_seconds=10,
+        )
+        return prompt_obj.compile(), prompt_obj
+    except Exception:
+        logger.exception("Falha ao buscar prompt do Langfuse — usando prompt local")
+        return local_text, None
+
+
+_SYSTEM_PROMPT, _LANGFUSE_PROMPT_OBJ = _load_system_prompt()
 
 if settings.groq_api_key:
     try:
@@ -95,15 +148,19 @@ async def enviar_mensagem(mensagem: str, *, thread_id: str) -> str:
     tratamento de erro especial pra esse endpoint.
     """
     assert AGENT is not None, "enviar_mensagem chamado sem o agente montado"
+
+    config: dict = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": _RECURSION_LIMIT,
+    }
+    if _langfuse_handler is not None:
+        config["callbacks"] = [_langfuse_handler]
+    if _LANGFUSE_PROMPT_OBJ is not None:
+        config["metadata"] = {"langfuse_prompt": _LANGFUSE_PROMPT_OBJ}
+
     try:
         resultado = await asyncio.wait_for(
-            AGENT.ainvoke(
-                {"messages": [{"role": "user", "content": mensagem}]},
-                config={
-                    "configurable": {"thread_id": thread_id},
-                    "recursion_limit": _RECURSION_LIMIT,
-                },
-            ),
+            AGENT.ainvoke({"messages": [{"role": "user", "content": mensagem}]}, config=config),
             timeout=_TIMEOUT_SECONDS,
         )
         return resultado["messages"][-1].content

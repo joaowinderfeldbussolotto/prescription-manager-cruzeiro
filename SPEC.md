@@ -226,6 +226,17 @@ parametrizável por role pra não precisar refatorar depois.
   - **Memória multi-turn** via checkpointer do LangGraph
     (`langgraph-checkpoint-mongodb`, `MongoDBSaver`), thread por usuário, com
     TTL pra expirar histórico antigo.
+  - **Observabilidade e prompt management via Langfuse** (opcional/aditivo —
+    `LANGFUSE_SECRET_KEY`/`LANGFUSE_PUBLIC_KEY`): `CallbackHandler` do
+    `langfuse.langchain` traça cada turno (prompt, tool calls, modelo usado,
+    tempo/custo) no dashboard do Langfuse Cloud. O prompt do sistema passa a
+    ser buscado via `get_prompt(LANGFUSE_PROMPT_NAME, fallback=<texto local>)`
+    — se Langfuse não estiver configurado ou a busca falhar, usa o
+    `fallback` nativo do SDK (o conteúdo de `system_prompt.md`), sem
+    derrubar o agente. O objeto do prompt retornado é anexado a cada trace
+    via `config={"metadata": {"langfuse_prompt": prompt}}`, associando a
+    versão exata usada. Precisa de um "Text Prompt" com esse nome criado
+    manualmente no dashboard do Langfuse antes de existir lá.
   - **Links**: cada tool instrui o modelo a incluir `[Nome](/clientes/ID)`
     na resposta quando relevante; o frontend faz o parse desse padrão
     markdown. A informação sempre aparece em texto simples também (o link é

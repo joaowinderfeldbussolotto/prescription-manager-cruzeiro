@@ -103,6 +103,17 @@ def test_agente_mensagem_vazia_422():
         _clear_auth_override()
 
 
+def test_prompt_local_sem_langfuse_configurado():
+    """Sem LANGFUSE_SECRET_KEY/LANGFUSE_PUBLIC_KEY (default no ambiente de
+    teste), o client do Langfuse nem é construído, e o prompt do sistema
+    vem do arquivo local — sem chamada de rede."""
+    assert agent_service._langfuse_client is None
+    texto, prompt_obj = agent_service._load_system_prompt()
+    assert prompt_obj is None
+    assert texto == agent_service._PROMPT_PATH.read_text(encoding="utf-8")
+    assert texto == _SYSTEM_PROMPT
+
+
 # --- Fiação (agente real, modelo fake, sem rede/Mongo) ----------------------
 
 

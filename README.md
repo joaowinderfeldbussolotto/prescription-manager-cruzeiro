@@ -450,10 +450,30 @@ em caso de erro do modelo primário (ver `backend/app/agent/service.py`).
   — o link é um bônus de navegação, nunca o único jeito de saber o que
   aconteceu (o fallback ao modelo menor tende a seguir formatação pior que o
   principal).
+- **Observabilidade e prompt management via [Langfuse](https://langfuse.com)**
+  (opcional, aditivo — configure `LANGFUSE_SECRET_KEY`/`LANGFUSE_PUBLIC_KEY`
+  pra ativar):
+  - **Tracing**: cada turno de conversa vira um trace navegável no dashboard
+    do Langfuse Cloud (via `CallbackHandler` do LangChain) — dá pra ver o
+    prompt exato, as tool calls, o modelo usado (primário ou fallback) e o
+    tempo/custo de cada chamada.
+  - **Prompt management**: o prompt do sistema passa a ser buscado do
+    Langfuse (`get_prompt`) em vez de só do arquivo local — editar o prompt
+    vira só editar no dashboard do Langfuse, sem redeploy. O arquivo local
+    (`system_prompt.md`) continua existindo como **fallback automático** se
+    o Langfuse estiver fora do ar ou não configurado. Cada trace fica
+    associado à versão exata do prompt usado.
+  - **Setup manual necessário**: crie uma conta no
+    [Langfuse Cloud](https://cloud.langfuse.com), copie as chaves do
+    projeto pro `.env`, e crie um "Text Prompt" chamado
+    `agente-cruzeiro-system-prompt` (ou o nome que você definir em
+    `LANGFUSE_PROMPT_NAME`) com o conteúdo de
+    `backend/app/agent/prompts/system_prompt.md` como versão inicial.
 
 **Toggle:** `AGENTE_ENABLED=false` no `.env` esconde a aba e desliga o
 endpoint (404). Sem `GROQ_API_KEY` configurada, o endpoint também fica
-indisponível (404), mesmo com o toggle ligado.
+indisponível (404), mesmo com o toggle ligado. Sem `LANGFUSE_*` configurado,
+o Agente funciona igual, só sem tracing e com o prompt local.
 
 **Limitações conhecidas**: o fallback só cobre outro modelo do Groq (não uma
 queda do Groq inteiro); rate limit do Groq no tier grátis é baixo e cada
@@ -510,6 +530,9 @@ Edite `.env` e restarte (`docker compose up -d`):
 | `GROQ_API_KEY` | vazio | Chave da API do Groq — sem ela, o Agente fica indisponível (404) |
 | `GROQ_MODEL_PRIMARY` | `openai/gpt-oss-120b` | Modelo primário do Agente |
 | `GROQ_MODEL_FALLBACKS` | `openai/gpt-oss-20b` | Modelo(s) de fallback, separados por vírgula |
+| `LANGFUSE_SECRET_KEY` / `LANGFUSE_PUBLIC_KEY` | vazio | Ativam tracing + prompt management do Agente |
+| `LANGFUSE_BASE_URL` | `https://cloud.langfuse.com` | Região de dados do Langfuse Cloud |
+| `LANGFUSE_PROMPT_NAME` | `agente-cruzeiro-system-prompt` | Nome do prompt no Langfuse (precisa existir lá) |
 | `COOKIE_SECURE` | `false` | Cookie só funciona com HTTPS se `true` |
 | `CORS_ORIGINS` | `http://localhost:*` | Origins autorizadas pra CORS |
 

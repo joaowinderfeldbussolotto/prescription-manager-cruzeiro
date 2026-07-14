@@ -105,6 +105,22 @@ class Settings(BaseSettings):
     # catálogo de modelos do Groq mude.
     groq_model_fallbacks: str = "openai/gpt-oss-20b"
 
+    # --- Observabilidade / Prompt management (Langfuse) -------------------
+    # Usadas só como GATE (liga tracing/prompt-fetch se as duas chaves
+    # existirem). O client do Langfuse (`get_client()`/`CallbackHandler()`)
+    # lê as credenciais direto do ambiente do processo (LANGFUSE_SECRET_KEY/
+    # LANGFUSE_PUBLIC_KEY/LANGFUSE_BASE_URL) — o docker-compose já injeta
+    # essas variáveis no container, então não repassamos as settings pro SDK
+    # manualmente.
+    langfuse_secret_key: str | None = None
+    langfuse_public_key: str | None = None
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+    # Nome do prompt no Langfuse (Prompt Management). Precisa ser criado
+    # manualmente no dashboard do Langfuse antes de existir lá — sem ele (ou
+    # sem Langfuse configurado), o agente usa o prompt local
+    # (app/agent/prompts/system_prompt.md) como fallback.
+    langfuse_prompt_name: str = "agente-cruzeiro-system-prompt"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
