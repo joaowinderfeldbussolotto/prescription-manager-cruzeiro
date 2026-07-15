@@ -61,10 +61,11 @@ async def cadastrar_cliente(
     esse dado explicitamente na conversa — nunca invente CPF, e-mail,
     endereço ou data de nascimento.
 
-    Já existe cliente com esse telefone: esta ferramenta recusa o cadastro
-    (telefone é único por cliente ativo). Nesse caso, confirme com o usuário
-    se é a mesma pessoa e, se for, use `editar_cliente` em vez de tentar
-    cadastrar de novo.
+    Já existe cliente com esse telefone OU esse CPF: esta ferramenta recusa
+    o cadastro (telefone e CPF são únicos por cliente ativo, cada um
+    checado independentemente). Nesse caso, confirme com o usuário se é a
+    mesma pessoa e, se for, use `editar_cliente` em vez de tentar cadastrar
+    de novo.
 
     Ao ter sucesso, inclua na sua resposta final ao usuário um link markdown
     no formato [NOME_DO_CLIENTE](/clientes/ID_RETORNADO), além de mencionar
@@ -125,6 +126,9 @@ async def editar_cliente(
     (nome, telefone e um link markdown [Nome](/clientes/ID) pra cada um) e
     peça pro usuário confirmar qual deles antes de chamar esta ferramenta de
     novo. Se não encontrar nenhum, diga isso claramente ao usuário.
+
+    Se `novo_telefone` ou `novo_cpf` já pertencer a OUTRO cliente ativo, a
+    edição é recusada (telefone e CPF são únicos por cliente).
     """
     try:
         encontrados = await _buscar_clientes(busca, limit=5)

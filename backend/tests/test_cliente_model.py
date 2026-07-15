@@ -142,6 +142,72 @@ async def test_update_permite_manter_proprio_telefone():
     assert atualizado["email"] == "a@teste.com"
 
 
+async def test_create_recusa_cpf_duplicado():
+    db = _FakeDB([_doc("Maria Souza", "11999999999", cpf="123.456.789-00")])
+
+    with pytest.raises(cliente_repo.ClienteDuplicadoError, match="Maria Souza"):
+        await cliente_repo.create(
+            db, {"nome": "Maria Outra", "telefone": "11888888888", "cpf": "123.456.789-00"}
+        )
+
+
+async def test_create_permite_sem_cpf_informado():
+    """Cliente sem CPF (campo opcional) não deve disparar checagem nenhuma."""
+    db = _FakeDB([_doc("Maria Souza", "11999999999", cpf="123.456.789-00")])
+
+    criado = await cliente_repo.create(db, {"nome": "João Silva", "telefone": "11888888888"})
+
+    assert criado["nome"] == "João Silva"
+
+
+async def test_update_recusa_cpf_duplicado_de_outro_cliente():
+    a = _doc("Cliente A", "11111111111", cpf="123.456.789-00")
+    b = _doc("Cliente B", "22222222222", cpf="999.999.999-99")
+    db = _FakeDB([a, b])
+
+    with pytest.raises(cliente_repo.ClienteDuplicadoError, match="Cliente A"):
+        await cliente_repo.update(db, str(b["_id"]), {"cpf": "123.456.789-00"})
+
+
+async def test_update_apenas_cpf_sem_telefone_no_payload():
+    """Editar só o CPF (sem telefone no payload) ainda deve checar duplicidade
+    de CPF normalmente — os dois campos são checados independentemente."""
+    a = _doc("Cliente A", "11111111111", cpf="111.111.111-11")
+    b = _doc("Cliente B", "22222222222", cpf="222.222.222-22")
+    db = _FakeDB([a, b])
+
+    with pytest.raises(cliente_repo.ClienteDuplicadoError, match="Cliente A"):
+        await cliente_repo.update(db, str(b["_id"]), {"cpf": "111.111.111-11"})
+
+
+async def test_create_trim_pega_duplicata_mesmo_com_espacos_no_input():
+    """Espaço em branco (acidental, ex.: colado de outro sistema) no valor
+    recebido não pode driblar a checagem de duplicidade."""
+    db = _FakeDB([_doc("Maria Souza", "11999999999")])
+
+    with pytest.raises(cliente_repo.ClienteDuplicadoError, match="Maria Souza"):
+        await cliente_repo.create(db, {"nome": "Maria Outra", "telefone": "  11999999999  "})
+
+
+async def test_create_persiste_telefone_e_cpf_sem_espacos():
+    """O valor persistido também é normalizado (trim) — não só o valor usado
+    na comparação — pra uma checagem futura por exact-match continuar
+    funcionando de forma consistente."""
+    db = _FakeDB([])
+
+    criado = await cliente_repo.create(
+        db,
+        {
+            "nome": "João Silva",
+            "telefone": "  11888888888  ",
+            "cpf": " 123.456.789-00 ",
+        },
+    )
+
+    assert criado["telefone"] == "11888888888"
+    assert criado["cpf"] == "123.456.789-00"
+
+
 async def test_add_acompanhamento_converte_date_para_datetime():
     """Regressão: `data_agendada` chega como `date` puro (vindo da tool do
     agente) — BSON não tem tipo `date` (só `datetime`), então gravar sem

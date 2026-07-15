@@ -10,8 +10,13 @@ from app.db.serialization import doc_to_api, date_to_datetime, to_object_id, utc
 
 
 class ClienteDuplicadoError(Exception):
-    """Levantada ao tentar cadastrar/editar um cliente com telefone que já
-    pertence a outro cliente ativo (não soft-deletado)."""
+    """Levantada ao tentar cadastrar/editar um cliente com telefone ou CPF
+    que já pertence a outro cliente ativo (não soft-deletado)."""
+
+
+# campos que precisam ser únicos entre clientes ativos; o rótulo é usado na
+# mensagem de erro (ex.: "Já existe um cliente cadastrado com o CPF ...")
+_CAMPOS_UNICOS = (("telefone", "telefone"), ("cpf", "CPF"))
 
 
 def _base_filter() -> dict:
@@ -19,24 +24,48 @@ def _base_filter() -> dict:
     return {"deletado": {"$ne": True}}
 
 
-async def _buscar_por_telefone(
-    db: AsyncDatabase, telefone: str, *, excluir_id: str | None = None
+async def _buscar_por_campo_unico(
+    db: AsyncDatabase, campo: str, valor: str, *, excluir_id: str | None = None
 ) -> dict | None:
-    query = {"telefone": telefone, **_base_filter()}
+    query = {campo: valor.strip(), **_base_filter()}
     if excluir_id is not None:
         query["_id"] = {"$ne": to_object_id(excluir_id)}
     return await db.clientes.find_one(query)
 
 
+def _trim_campos_unicos(doc: dict) -> None:
+    """Normaliza telefone/cpf com `strip()` antes de checar duplicidade ou
+    persistir — garante que o valor salvo é sempre o mesmo que uma checagem
+    futura compararia (um exact-match no Mongo não ignora espaço em branco
+    sozinho)."""
+    for campo, _rotulo in _CAMPOS_UNICOS:
+        valor = doc.get(campo)
+        if isinstance(valor, str):
+            doc[campo] = valor.strip()
+
+
+async def _checar_duplicidade(
+    db: AsyncDatabase, doc: dict, *, excluir_id: str | None = None
+) -> None:
+    """Levanta `ClienteDuplicadoError` se `telefone` ou `cpf` (o que tiver
+    sido informado em `doc`, já normalizado por `_trim_campos_unicos`) já
+    pertence a outro cliente ativo."""
+    for campo, rotulo in _CAMPOS_UNICOS:
+        valor = doc.get(campo)
+        if not valor:
+            continue
+        existente = await _buscar_por_campo_unico(db, campo, valor, excluir_id=excluir_id)
+        if existente is not None:
+            prefixo = "outro cliente" if excluir_id is not None else "um cliente"
+            raise ClienteDuplicadoError(
+                f"Já existe {prefixo} cadastrado com o {rotulo} {valor}: {existente['nome']}."
+            )
+
+
 async def create(db: AsyncDatabase, data: dict) -> dict:
     doc = dict(data)
-    telefone = doc.get("telefone")
-    if telefone:
-        existente = await _buscar_por_telefone(db, telefone)
-        if existente is not None:
-            raise ClienteDuplicadoError(
-                f"Já existe um cliente cadastrado com o telefone {telefone}: {existente['nome']}."
-            )
+    _trim_campos_unicos(doc)
+    await _checar_duplicidade(db, doc)
     if "data_nascimento" in doc:
         doc["data_nascimento"] = date_to_datetime(doc["data_nascimento"])
     doc["data_cadastro"] = utcnow()
@@ -95,13 +124,8 @@ async def list_paginated(
 
 async def update(db: AsyncDatabase, cliente_id: str, data: dict) -> dict | None:
     doc = dict(data)
-    telefone = doc.get("telefone")
-    if telefone:
-        existente = await _buscar_por_telefone(db, telefone, excluir_id=cliente_id)
-        if existente is not None:
-            raise ClienteDuplicadoError(
-                f"Já existe outro cliente cadastrado com o telefone {telefone}: {existente['nome']}."
-            )
+    _trim_campos_unicos(doc)
+    await _checar_duplicidade(db, doc, excluir_id=cliente_id)
     if "data_nascimento" in doc and doc["data_nascimento"] is not None:
         doc["data_nascimento"] = date_to_datetime(doc["data_nascimento"])
     if not doc:
