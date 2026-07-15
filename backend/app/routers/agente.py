@@ -23,5 +23,10 @@ async def enviar_mensagem(
     if not settings.agente_enabled or agent_service.AGENT is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Não disponível")
 
-    resposta = await agent_service.enviar_mensagem(payload.mensagem, thread_id=user["id"])
+    # session_id vem de um carregamento de página do chat (F5 gera um novo)
+    # — combinado com o id do usuário autenticado, dá um thread por
+    # carregamento em vez de um thread fixo pra sempre por usuário. Sem
+    # session_id (client antigo/cache), cai no comportamento anterior.
+    thread_id = f"{user['id']}:{payload.session_id}" if payload.session_id else user["id"]
+    resposta = await agent_service.enviar_mensagem(payload.mensagem, thread_id=thread_id)
     return AgenteResponse(resposta=resposta)

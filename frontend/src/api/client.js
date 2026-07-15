@@ -55,7 +55,8 @@ export const dashboard = {
 }
 
 export const agente = {
-  enviar: (mensagem) => http.post('/agente/mensagem', { mensagem }).then((r) => r.data),
+  enviar: (mensagem, sessionId) =>
+    http.post('/agente/mensagem', { mensagem, session_id: sessionId }).then((r) => r.data),
 }
 
 // PUT direto no storage (MinIO/S3) usando a presigned URL. Não passa pelo

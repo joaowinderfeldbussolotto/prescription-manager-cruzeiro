@@ -207,8 +207,15 @@ parametrizável por role pra não precisar refatorar depois.
   esconde o botão no frontend quando desligado.
 
 ### Agente (LLM real)
-- `POST /agente/mensagem` — recebe `{ mensagem }`, retorna `{ resposta }`.
-  **Agente real** via LangChain `create_agent`, modelo primário Groq
+- `POST /agente/mensagem` — recebe `{ mensagem, session_id? }`, retorna
+  `{ resposta }`. `session_id` (opcional) identifica o carregamento de
+  página do chat no frontend (gerado uma vez por mount — F5 gera um novo);
+  o router combina com o id do usuário autenticado
+  (`thread_id = user_id:session_id`) pra dar a cada carregamento de página
+  sua própria memória/conversa, em vez de um thread fixo pra sempre por
+  usuário. Sem `session_id`, cai no comportamento anterior (thread só por
+  usuário). **Agente real** via LangChain `create_agent`, modelo primário
+  Groq
   `openai/gpt-oss-120b` (`init_chat_model`), com `ModelFallbackMiddleware`
   pra `openai/gpt-oss-20b` em caso de erro. Frontend aceita texto livre;
   chips de sugestão continuam existindo como atalhos.
@@ -309,5 +316,7 @@ nesta fase:
    pré-selecionado; modelo multimodal lê a imagem e chama uma tool de busca
    pra encontrar o cliente correspondente. Ainda sem contrato de API nem
    mock — fica pra quando essa fase entrar em planejamento de verdade.
-2. **Botão de "nova conversa" no Agente** — hoje a memória do chat é um
-   thread contínuo por usuário (com TTL), sem opção de reset manual.
+2. **Botão de "nova conversa" no Agente sem precisar de F5** — hoje o
+   `thread_id` combina o usuário autenticado com um `session_id` gerado
+   pelo frontend a cada carregamento de página (F5 = conversa nova), mas
+   não há como resetar a memória dentro da mesma página sem recarregar.

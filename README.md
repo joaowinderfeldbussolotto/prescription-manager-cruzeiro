@@ -479,11 +479,19 @@ endpoint (404). Sem `GROQ_API_KEY` configurada, o endpoint também fica
 indisponível (404), mesmo com o toggle ligado. Sem `LANGFUSE_*` configurado,
 o Agente funciona igual, só sem tracing e com o prompt local.
 
+**Memória por carregamento de página**: o frontend gera um `session_id`
+novo a cada *mount* do componente (F5 recarrega tudo do zero, então conta
+como carregamento novo) e manda junto de cada mensagem. O backend combina
+isso com o id do usuário autenticado (`thread_id = user_id:session_id`) —
+cada carregamento de página ganha sua própria memória/conversa, em vez de
+um thread fixo pra sempre por usuário. Isso também refina o agrupamento das
+sessions no Langfuse (`langfuse_session_id` usa o mesmo `thread_id`): uma
+session por carregamento de página, não uma pra sempre por usuário.
+
 **Limitações conhecidas**: o fallback só cobre outro modelo do Groq (não uma
 queda do Groq inteiro); rate limit do Groq no tier grátis é baixo e cada
 turno do agente pode custar 2-4 chamadas ao modelo (tool-calling) — erros
-viram uma resposta amigável no chat, não um 500; não há botão de "nova
-conversa" ainda (a memória é um thread contínuo por usuário).
+viram uma resposta amigável no chat, não um 500.
 
 ### Features Principais
 
@@ -543,7 +551,7 @@ Edite `.env` e restarte (`docker compose up -d`):
 ### Próximos Passos (Road Map)
 
 - **IA real (extração de receita)**: substitua o mock em `backend/app/schemas/extracao.py`. UI não muda.
-- **Botão de "nova conversa" no Agente**: hoje a memória é um thread contínuo por usuário (sem reset).
+- **Botão de "nova conversa" no Agente sem precisar de F5**: hoje resetar a memória exige recarregar a página (novo `session_id` só é gerado no mount do componente).
 - **S3 real**: mude `S3_ENDPOINT_*` pra bucket AWS. Código não muda.
 - **Google OAuth**: registre Client ID no Google Cloud Console.
 - **Módulo de relojoaria**: estrutura pronta, fora de escopo.

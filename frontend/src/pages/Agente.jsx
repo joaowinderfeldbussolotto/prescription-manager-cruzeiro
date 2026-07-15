@@ -38,6 +38,18 @@ function MarkdownLink({ href, children }) {
   )
 }
 
+// Identifica esta "aba/carregamento de página" do chat — não confundir com
+// a sessão de autenticação (cookie de login). Gerado uma vez por mount do
+// componente: um F5 remonta tudo do zero, então o backend passa a tratar
+// como uma conversa nova (memória multi-turn + agrupamento no Langfuse).
+// Usa crypto.getRandomValues() em vez de crypto.randomUUID() porque este
+// último só funciona em contexto seguro (HTTPS/localhost) — a instância
+// atual em produção roda em HTTP puro.
+function gerarSessionId() {
+  const bytes = crypto.getRandomValues(new Uint32Array(4))
+  return Array.from(bytes, (n) => n.toString(16)).join('-')
+}
+
 function Bolha({ msg }) {
   const isUser = msg.autor === 'user'
   return (
@@ -57,6 +69,7 @@ export default function Agente() {
   const [mensagens, setMensagens] = useState([])
   const [enviando, setEnviando] = useState(false)
   const [texto, setTexto] = useState('')
+  const [sessionId] = useState(gerarSessionId)
 
   if (!AGENTE_ENABLED) {
     return <Navigate to="/" replace />
@@ -68,7 +81,7 @@ export default function Agente() {
     setMensagens((prev) => [...prev, { autor: 'user', texto: msg }])
     setEnviando(true)
     try {
-      const res = await agente.enviar(msg)
+      const res = await agente.enviar(msg, sessionId)
       setMensagens((prev) => [...prev, { autor: 'agente', texto: res.resposta }])
     } catch (err) {
       setMensagens((prev) => [...prev, { autor: 'agente', texto: errorMessage(err) }])

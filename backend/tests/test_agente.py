@@ -89,7 +89,34 @@ def test_agente_happy_path_chama_o_agente(monkeypatch):
         assert r.status_code == 200
         body = r.json()
         assert body == {"resposta": "Pronto! Cadastrei a Maria Souza. [Maria Souza](/clientes/665aaa)"}
+        # sem session_id no payload -> cai no comportamento antigo (thread fixo por usuário)
         assert chamadas == [("Cadastra a Maria Souza", FAKE_USER["id"])]
+    finally:
+        _clear_auth_override()
+
+
+def test_agente_com_session_id_compoe_thread_id(monkeypatch):
+    """Com `session_id` (gerado pelo frontend a cada carregamento de página,
+    F5 inclusive), o thread_id vira `user_id:session_id` — cada carregamento
+    de página ganha sua própria memória/conversa, em vez de um thread fixo
+    pra sempre por usuário."""
+    _authenticate()
+    try:
+        chamadas = []
+
+        async def fake_enviar_mensagem(mensagem: str, *, thread_id: str) -> str:
+            chamadas.append((mensagem, thread_id))
+            return "ok"
+
+        monkeypatch.setattr(agente_router.agent_service, "AGENT", object())
+        monkeypatch.setattr(agente_router.agent_service, "enviar_mensagem", fake_enviar_mensagem)
+
+        r = client.post(
+            "/api/agente/mensagem",
+            json={"mensagem": "oi", "session_id": "abc123"},
+        )
+        assert r.status_code == 200
+        assert chamadas == [("oi", f"{FAKE_USER['id']}:abc123")]
     finally:
         _clear_auth_override()
 
