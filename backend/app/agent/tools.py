@@ -12,12 +12,13 @@ agente por causa de um dado mal formatado.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from langchain_core.tools import tool
 from pydantic import ValidationError
 
 from app.db.mongo import get_db
+from app.db.serialization import as_date
 from app.models import cliente as cliente_repo
 from app.models import receita as receita_repo
 from app.schemas.cliente import Acompanhamento, ClienteCreate, ClienteUpdate
@@ -316,7 +317,7 @@ async def verificar_validade_receita(cliente_nome: str) -> str:
         return f"{cliente['nome']} não tem nenhuma receita cadastrada ainda."
 
     receita = receitas[0]
-    data_vencimento = receita.get("validade")
+    data_vencimento = as_date(receita.get("validade"))
     if not data_vencimento:
         return f"Receita de {cliente['nome']} não possui data de validade informada."
 
@@ -444,9 +445,10 @@ async def listar_acompanhamentos(cliente_nome: str, filtro: str = "pendentes") -
         return f"Nenhum acompanhamento {filtro} para {cliente['nome']}."
 
     linhas = []
-    for a in sorted(acompanhamentos, key=lambda x: x.get("data_agendada", "")):
+    for a in sorted(acompanhamentos, key=lambda x: as_date(x.get("data_agendada")) or date.min):
         status = "✅" if a.get("concluido") else "⏰"
-        data_str = a.get("data_agendada", "—")
+        data_agendada = as_date(a.get("data_agendada"))
+        data_str = data_agendada.strftime("%d/%m/%Y") if data_agendada else "—"
         linhas.append(f"{status} {data_str} — {a.get('tipo', '—').upper()}: {a.get('descricao', '—')}")
 
     return f"Acompanhamentos ({filtro}) de {cliente['nome']}:\n" + "\n".join(linhas)
