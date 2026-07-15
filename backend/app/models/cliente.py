@@ -9,13 +9,34 @@ from pymongo.asynchronous.database import AsyncDatabase
 from app.db.serialization import doc_to_api, date_to_datetime, to_object_id, utcnow
 
 
+class ClienteDuplicadoError(Exception):
+    """Levantada ao tentar cadastrar/editar um cliente com telefone que já
+    pertence a outro cliente ativo (não soft-deletado)."""
+
+
 def _base_filter() -> dict:
     # exclui soft-deletados das listagens/consultas
     return {"deletado": {"$ne": True}}
 
 
+async def _buscar_por_telefone(
+    db: AsyncDatabase, telefone: str, *, excluir_id: str | None = None
+) -> dict | None:
+    query = {"telefone": telefone, **_base_filter()}
+    if excluir_id is not None:
+        query["_id"] = {"$ne": to_object_id(excluir_id)}
+    return await db.clientes.find_one(query)
+
+
 async def create(db: AsyncDatabase, data: dict) -> dict:
     doc = dict(data)
+    telefone = doc.get("telefone")
+    if telefone:
+        existente = await _buscar_por_telefone(db, telefone)
+        if existente is not None:
+            raise ClienteDuplicadoError(
+                f"Já existe um cliente cadastrado com o telefone {telefone}: {existente['nome']}."
+            )
     if "data_nascimento" in doc:
         doc["data_nascimento"] = date_to_datetime(doc["data_nascimento"])
     doc["data_cadastro"] = utcnow()
@@ -74,6 +95,13 @@ async def list_paginated(
 
 async def update(db: AsyncDatabase, cliente_id: str, data: dict) -> dict | None:
     doc = dict(data)
+    telefone = doc.get("telefone")
+    if telefone:
+        existente = await _buscar_por_telefone(db, telefone, excluir_id=cliente_id)
+        if existente is not None:
+            raise ClienteDuplicadoError(
+                f"Já existe outro cliente cadastrado com o telefone {telefone}: {existente['nome']}."
+            )
     if "data_nascimento" in doc and doc["data_nascimento"] is not None:
         doc["data_nascimento"] = date_to_datetime(doc["data_nascimento"])
     if not doc:

@@ -60,6 +60,11 @@ async def cadastrar_cliente(
     esse dado explicitamente na conversa — nunca invente CPF, e-mail,
     endereço ou data de nascimento.
 
+    Já existe cliente com esse telefone: esta ferramenta recusa o cadastro
+    (telefone é único por cliente ativo). Nesse caso, confirme com o usuário
+    se é a mesma pessoa e, se for, use `editar_cliente` em vez de tentar
+    cadastrar de novo.
+
     Ao ter sucesso, inclua na sua resposta final ao usuário um link markdown
     no formato [NOME_DO_CLIENTE](/clientes/ID_RETORNADO), além de mencionar
     os dados em texto simples (o link é um bônus, não o único jeito de
@@ -80,6 +85,11 @@ async def cadastrar_cliente(
     try:
         db = get_db()
         criado = await cliente_repo.create(db, dados)
+    except cliente_repo.ClienteDuplicadoError as exc:
+        return (
+            f"{exc} Se for a mesma pessoa, use editar_cliente pra atualizar os dados "
+            "dela em vez de cadastrar de novo."
+        )
     except Exception as exc:  # noqa: BLE001 - nunca deixa a tool derrubar o turno do agente
         return f"Erro ao cadastrar o cliente: {exc}"
 
@@ -148,6 +158,8 @@ async def editar_cliente(
         alvo = encontrados[0]
         db = get_db()
         atualizado = await cliente_repo.update(db, alvo["id"], mudancas)
+    except cliente_repo.ClienteDuplicadoError as exc:
+        return str(exc)
     except Exception as exc:  # noqa: BLE001
         return f"Erro ao atualizar o cliente: {exc}"
 
