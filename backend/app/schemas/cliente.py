@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime
+from typing import Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -22,6 +24,17 @@ def _validate_cpf_format(value: str | None) -> str | None:
     return value
 
 
+class Acompanhamento(BaseModel):
+    """Follow-up/lembrete ligado ao cliente."""
+
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    data_agendada: date
+    tipo: Literal["ligar", "email", "sms", "visita", "outro"]
+    descricao: str = Field(..., min_length=1, max_length=500)
+    criado_em: datetime = Field(default_factory=datetime.now)
+    concluido: bool = False
+
+
 class ClienteBase(BaseModel):
     nome: str = Field(..., min_length=1, max_length=200)
     cpf: str | None = Field(default=None, description="Formato validado, sem dígito verificador")
@@ -29,6 +42,7 @@ class ClienteBase(BaseModel):
     email: EmailStr | None = None
     data_nascimento: date | None = None
     endereco: str | None = Field(default=None, max_length=500)
+    acompanhamentos: list[Acompanhamento] = Field(default_factory=list)
 
     @field_validator("cpf")
     @classmethod
