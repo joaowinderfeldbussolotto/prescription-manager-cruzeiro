@@ -165,31 +165,3 @@ async def delete(db: AsyncDatabase, cliente_id: str) -> tuple[bool, bool]:
 
     await db.clientes.delete_one({"_id": oid})
     return True, False
-
-
-async def add_acompanhamento(db: AsyncDatabase, cliente_id: str, acompanhamento: dict) -> bool:
-    """Adiciona um acompanhamento à lista do cliente."""
-    doc = dict(acompanhamento)
-    if "data_agendada" in doc:
-        # BSON não tem tipo `date` puro (só `datetime`) — sem isso, o insert
-        # levanta InvalidDocument (mesma causa raiz do bug em `verificar_validade_receita`).
-        doc["data_agendada"] = date_to_datetime(doc["data_agendada"])
-    result = await db.clientes.update_one(
-        {"_id": to_object_id(cliente_id), **_base_filter()},
-        {
-            "$push": {"acompanhamentos": doc},
-            "$set": {"data_atualizado": utcnow()},
-        },
-    )
-    return result.modified_count > 0
-
-
-async def mark_acompanhamento_done(
-    db: AsyncDatabase, cliente_id: str, acompanhamento_id: str
-) -> bool:
-    """Marca um acompanhamento como concluído."""
-    result = await db.clientes.update_one(
-        {"_id": to_object_id(cliente_id), "acompanhamentos.id": acompanhamento_id},
-        {"$set": {"acompanhamentos.$.concluido": True}},
-    )
-    return result.modified_count > 0
