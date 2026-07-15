@@ -28,5 +28,13 @@ async def enviar_mensagem(
     # carregamento em vez de um thread fixo pra sempre por usuário. Sem
     # session_id (client antigo/cache), cai no comportamento anterior.
     thread_id = f"{user['id']}:{payload.session_id}" if payload.session_id else user["id"]
-    resposta = await agent_service.enviar_mensagem(payload.mensagem, thread_id=thread_id)
+    # usuario_id/nome identificam o RESPONSÁVEL pra tools como
+    # agendar_acompanhamento (nunca exposto ao LLM — chega só via
+    # RunnableConfig, ver app/agent/service.py e app/agent/tools.py).
+    resposta = await agent_service.enviar_mensagem(
+        payload.mensagem,
+        thread_id=thread_id,
+        usuario_id=user["id"],
+        usuario_nome=user.get("nome") or user.get("email"),
+    )
     return AgenteResponse(resposta=resposta)

@@ -12,16 +12,19 @@ agente por causa de um dado mal formatado.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import ValidationError
 
 from app.db.mongo import get_db
 from app.db.serialization import as_date
+from app.models import acompanhamento as acompanhamento_repo
 from app.models import cliente as cliente_repo
 from app.models import receita as receita_repo
-from app.schemas.cliente import Acompanhamento, ClienteCreate, ClienteUpdate
+from app.schemas.acompanhamento import AcompanhamentoCreate
+from app.schemas.cliente import ClienteCreate, ClienteUpdate
 
 
 async def _buscar_clientes(termo: str, limit: int = 10) -> list[dict]:
@@ -345,17 +348,31 @@ async def verificar_validade_receita(cliente_nome: str) -> str:
         )
 
 
+def _responsavel_de(config: RunnableConfig) -> tuple[str, str] | None:
+    """Extrai (usuario_id, usuario_nome) do config injetado pelo LangChain —
+    NUNCA vem da conversa/LLM (ver app/agent/service.py). Retorna None se por
+    algum motivo o config não tiver o usuário (não deveria acontecer em uso
+    normal via app/routers/agente.py, mas a tool não pode confiar cegamente)."""
+    configurable = (config or {}).get("configurable", {})
+    usuario_id = configurable.get("usuario_id")
+    if not usuario_id:
+        return None
+    return usuario_id, configurable.get("usuario_nome") or "Atendente"
+
+
 @tool
 async def agendar_acompanhamento(
-    cliente_nome: str, tipo: str, descricao: str, data_agendada: str
+    cliente_nome: str, tipo: str, descricao: str, data_agendada: str, *, config: RunnableConfig
 ) -> str:
-    """Agenda um acompanhamento/follow-up para o cliente.
+    """Agenda um acompanhamento/follow-up para o cliente, sob responsabilidade
+    do atendente atual (quem está usando o chat agora).
 
     Use quando precisar criar um lembrete: "ligar segunda-feira", "enviar
     promoção depois", "agendar novo exame", etc.
 
     Argumentos:
-    - cliente_nome: Nome do cliente (será desambiguado se múltiplas matches).
+    - cliente_nome: Nome do cliente a quem o acompanhamento se refere (será
+      desambiguado se múltiplas matches).
     - tipo: Tipo de ação — ligar, email, sms, visita, outro.
     - descricao: Descrição da ação (ex: "enviar cupom de 15% desconto").
     - data_agendada: Data em formato DD/MM/YYYY (ex: "20/01/2026").
@@ -363,6 +380,11 @@ async def agendar_acompanhamento(
     Protocolo de desambiguação: se encontrar mais de um cliente, liste-os e
     peça confirmação antes de agendar.
     """
+    responsavel = _responsavel_de(config)
+    if responsavel is None:
+        return "Não consegui identificar o atendente responsável — tente novamente."
+    usuario_id, usuario_nome = responsavel
+
     try:
         encontrados = await _buscar_clientes(cliente_nome, limit=5)
     except Exception as exc:  # noqa: BLE001
@@ -383,79 +405,80 @@ async def agendar_acompanhamento(
     except ValueError:
         return f"Data inválida: '{data_agendada}'. Use formato DD/MM/YYYY (ex: 20/01/2026)."
 
-    tipos_validos = ["ligar", "email", "sms", "visita", "outro"]
-    if tipo.lower() not in tipos_validos:
-        return f"Tipo inválido: '{tipo}'. Use: {', '.join(tipos_validos)}."
-
     try:
-        acompanhamento = Acompanhamento(
+        dados = AcompanhamentoCreate(
+            cliente_id=cliente["id"],
+            cliente_nome=cliente["nome"],
+            usuario_id=usuario_id,
+            usuario_nome=usuario_nome,
             data_agendada=data_obj,
             tipo=tipo.lower(),
             descricao=descricao,
         ).model_dump()
+    except ValidationError as exc:
+        return f"Não consegui agendar: dados inválidos ({exc})."
 
+    try:
         db = get_db()
-        await cliente_repo.add_acompanhamento(db, cliente["id"], acompanhamento)
-
-        return (
-            f"✅ Acompanhamento agendado para {cliente['nome']}:\n"
-            f"- Ação: {tipo.upper()}\n"
-            f"- Data: {data_agendada}\n"
-            f"- Descrição: {descricao}"
-        )
+        await acompanhamento_repo.create(db, dados)
     except Exception as exc:  # noqa: BLE001
         return f"Erro ao agendar acompanhamento: {exc}"
 
+    return (
+        f"✅ Acompanhamento agendado para {cliente['nome']} (responsável: {usuario_nome}):\n"
+        f"- Ação: {tipo.upper()}\n"
+        f"- Data: {data_agendada}\n"
+        f"- Descrição: {descricao}"
+    )
+
 
 @tool
-async def listar_acompanhamentos(cliente_nome: str, filtro: str = "pendentes") -> str:
-    """Lista acompanhamentos/follow-ups agendados para o cliente.
+async def listar_meus_acompanhamentos(filtro: str = "pendentes", *, config: RunnableConfig) -> str:
+    """Lista os acompanhamentos/follow-ups do ATENDENTE ATUAL (responsável) —
+    cruza todos os clientes, NÃO filtra por um cliente específico.
 
-    Use para verificar lembretes: "quais acompanhamentos tem para João?".
+    Use quando o usuário perguntar "quais são meus acompanhamentos?", "o que
+    eu tenho agendado?", "meus lembretes pendentes", etc. Não use esta tool
+    pra perguntar sobre acompanhamentos de OUTRO atendente — ela só enxerga
+    os do usuário atual.
 
     Argumentos:
-    - cliente_nome: Nome do cliente.
-    - filtro: "pendentes" (default, mostra não-concluídos), "concluído" (mostra
-      só os concluídos), ou "todos" (mostra tudo).
-
-    Protocolo de desambiguação: se encontrar mais de um cliente, lista-os e
-    pede confirmação antes de listar.
+    - filtro: "pendentes" (default, não concluídos), "concluido" (só
+      concluídos), ou "todos".
     """
+    responsavel = _responsavel_de(config)
+    if responsavel is None:
+        return "Não consegui identificar o atendente responsável — tente novamente."
+    usuario_id, usuario_nome = responsavel
+
     try:
-        encontrados = await _buscar_clientes(cliente_nome, limit=5)
-    except Exception as exc:  # noqa: BLE001
-        return f"Erro ao buscar cliente: {exc}"
-
-    if not encontrados:
-        return f'Não encontrei nenhum cliente correspondente a "{cliente_nome}".'
-    if len(encontrados) > 1:
-        return (
-            f'Encontrei {len(encontrados)} clientes para "{cliente_nome}" — preciso que '
-            f"o usuário diga qual deles:\n{_formatar_clientes(encontrados)}"
+        db = get_db()
+        itens, total = await acompanhamento_repo.list_by_responsavel(
+            db, usuario_id, filtro=filtro, page=1, limit=20
         )
+    except Exception as exc:  # noqa: BLE001
+        return f"Erro ao listar acompanhamentos: {exc}"
 
-    cliente = encontrados[0]
-    acompanhamentos = cliente.get("acompanhamentos", [])
-
-    if not acompanhamentos:
-        return f"Nenhum acompanhamento registrado para {cliente['nome']}."
-
-    if filtro == "pendentes":
-        acompanhamentos = [a for a in acompanhamentos if not a.get("concluido")]
-    elif filtro == "concluído":
-        acompanhamentos = [a for a in acompanhamentos if a.get("concluido")]
-
-    if not acompanhamentos:
-        return f"Nenhum acompanhamento {filtro} para {cliente['nome']}."
+    if not itens:
+        return f"Nenhum acompanhamento {filtro} encontrado para {usuario_nome}."
 
     linhas = []
-    for a in sorted(acompanhamentos, key=lambda x: as_date(x.get("data_agendada")) or date.min):
+    for a in itens:
         status = "✅" if a.get("concluido") else "⏰"
         data_agendada = as_date(a.get("data_agendada"))
         data_str = data_agendada.strftime("%d/%m/%Y") if data_agendada else "—"
-        linhas.append(f"{status} {data_str} — {a.get('tipo', '—').upper()}: {a.get('descricao', '—')}")
+        cliente_link = f"[{a['cliente_nome']}](/clientes/{a['cliente_id']})"
+        linhas.append(
+            f"{status} {data_str} — {cliente_link} — {a.get('tipo', '—').upper()}: "
+            f"{a.get('descricao', '—')}"
+        )
 
-    return f"Acompanhamentos ({filtro}) de {cliente['nome']}:\n" + "\n".join(linhas)
+    resposta = f"Acompanhamentos ({filtro}) de {usuario_nome}:\n" + "\n".join(linhas)
+    if total > len(itens):
+        resposta += (
+            f"\n\n(mostrando {len(itens)} de {total} — veja todos na aba Acompanhamentos)"
+        )
+    return resposta
 
 
 TOOLS = [
@@ -466,5 +489,5 @@ TOOLS = [
     preparar_receita,
     verificar_validade_receita,
     agendar_acompanhamento,
-    listar_acompanhamentos,
+    listar_meus_acompanhamentos,
 ]
