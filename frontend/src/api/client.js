@@ -59,6 +59,14 @@ export const agente = {
     http.post('/agente/mensagem', { mensagem, session_id: sessionId }).then((r) => r.data),
 }
 
+// Listagem é sempre por RESPONSÁVEL (o usuário logado) — o backend nem
+// aceita um usuario_id por parâmetro, então não tem como filtrar por outro
+// atendente nem por cliente a partir daqui.
+export const acompanhamentos = {
+  list: (params) => http.get('/acompanhamentos', { params }).then((r) => r.data),
+  concluir: (id) => http.put(`/acompanhamentos/${id}/concluir`).then((r) => r.data),
+}
+
 // PUT direto no storage (MinIO/S3) usando a presigned URL. Não passa pelo
 // axios `http` (baseURL /api) — vai direto pro endpoint do storage.
 export async function uploadToStorage(uploadUrl, file) {
