@@ -1,17 +1,13 @@
-"""Testes de `app.models.cliente` — checagem de telefone duplicado e
-persistência de acompanhamentos.
+"""Testes de `app.models.cliente` — checagem de telefone/CPF duplicado.
 
 Sem MongoDB real (integração roda via Docker Compose): usamos um fake
-mínimo da collection, só com o que `cliente_repo` chama (`find_one`,
-`insert_one`, `find_one_and_update`, `update_one`), guardando os documentos
+mínimo da collection, só com o que `cliente_repo.create`/`update` chamam
+(`find_one`, `insert_one`, `find_one_and_update`), guardando os documentos
 numa lista em memória. Suficiente pra exercitar a regra de negócio sem
 precisar de infraestrutura externa.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
-
-import bson
 import pytest
 from bson import ObjectId
 
@@ -23,11 +19,6 @@ class _FakeInsertResult:
         self.inserted_id = inserted_id
 
 
-class _FakeUpdateResult:
-    def __init__(self, modified_count: int):
-        self.modified_count = modified_count
-
-
 class _FakeClientesCollection:
     def __init__(self, docs: list[dict]):
         self._docs = docs
@@ -35,10 +26,7 @@ class _FakeClientesCollection:
     @staticmethod
     def _matches(doc: dict, query: dict) -> bool:
         for key, value in query.items():
-            if key == "acompanhamentos.id":
-                if not any(a.get("id") == value for a in doc.get("acompanhamentos", [])):
-                    return False
-            elif isinstance(value, dict) and "$ne" in value:
+            if isinstance(value, dict) and "$ne" in value:
                 if doc.get(key) == value["$ne"]:
                     return False
             elif doc.get(key) != value:
@@ -63,27 +51,6 @@ class _FakeClientesCollection:
                 doc.update(update.get("$set", {}))
                 return dict(doc)
         return None
-
-    async def update_one(self, query: dict, update: dict) -> _FakeUpdateResult:
-        for doc in self._docs:
-            if self._matches(doc, query):
-                if "$push" in update:
-                    for field, value in update["$push"].items():
-                        doc.setdefault(field, []).append(value)
-                if "$set" in update:
-                    for field, value in update["$set"].items():
-                        if "." in field:
-                            # suporta o `$` posicional simplificado usado em
-                            # mark_acompanhamento_done ("acompanhamentos.$.concluido")
-                            lista_campo, _, resto = field.partition(".$.")
-                            alvo_id = query.get(f"{lista_campo}.id")
-                            for item in doc.get(lista_campo, []):
-                                if item.get("id") == alvo_id:
-                                    item[resto] = value
-                        else:
-                            doc[field] = value
-                return _FakeUpdateResult(modified_count=1)
-        return _FakeUpdateResult(modified_count=0)
 
 
 class _FakeDB:
@@ -206,52 +173,3 @@ async def test_create_persiste_telefone_e_cpf_sem_espacos():
 
     assert criado["telefone"] == "11888888888"
     assert criado["cpf"] == "123.456.789-00"
-
-
-async def test_add_acompanhamento_converte_date_para_datetime():
-    """Regressão: `data_agendada` chega como `date` puro (vindo da tool do
-    agente) — BSON não tem tipo `date` (só `datetime`), então gravar sem
-    converter levanta `InvalidDocument` assim que toca um Mongo de verdade.
-    `add_acompanhamento` precisa normalizar antes do `$push`."""
-    a = _doc("Cliente A", "11111111111")
-    db = _FakeDB([a])
-
-    ok = await cliente_repo.add_acompanhamento(
-        db,
-        str(a["_id"]),
-        {
-            "id": "ac1",
-            "data_agendada": date(2026, 1, 20),
-            "tipo": "ligar",
-            "descricao": "oferecer desconto",
-            "concluido": False,
-        },
-    )
-
-    assert ok is True
-    salvo = a["acompanhamentos"][0]
-    assert isinstance(salvo["data_agendada"], datetime)
-    # a prova real: o doc resultante precisa ser codificável em BSON
-    bson.encode({"data_agendada": salvo["data_agendada"]})
-
-
-async def test_mark_acompanhamento_done():
-    a = _doc(
-        "Cliente A",
-        "11111111111",
-        acompanhamentos=[
-            {
-                "id": "ac1",
-                "data_agendada": datetime(2026, 1, 20),
-                "tipo": "ligar",
-                "descricao": "x",
-                "concluido": False,
-            }
-        ],
-    )
-    db = _FakeDB([a])
-
-    ok = await cliente_repo.mark_acompanhamento_done(db, str(a["_id"]), "ac1")
-
-    assert ok is True
-    assert a["acompanhamentos"][0]["concluido"] is True

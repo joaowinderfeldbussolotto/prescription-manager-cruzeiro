@@ -40,6 +40,8 @@ def test_receitas_e_uploads_exigem_sessao():
     )
     assert client.get("/api/dashboard").status_code == 401
     assert client.post("/api/agente/mensagem", json={"mensagem": "x"}).status_code == 401
+    assert client.get("/api/acompanhamentos").status_code == 401
+    assert client.put("/api/acompanhamentos/abc/concluir").status_code == 401
 
 
 def test_dev_login_email_invalido_422():
@@ -63,5 +65,7 @@ def test_openapi_lista_todas_as_rotas():
         "/api/uploads/presigned-url",
         "/api/dashboard",
         "/api/agente/mensagem",
+        "/api/acompanhamentos",
+        "/api/acompanhamentos/{acompanhamento_id}/concluir",
     }
     assert esperadas.issubset(paths.keys())
