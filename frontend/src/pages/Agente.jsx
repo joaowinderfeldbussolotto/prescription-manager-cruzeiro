@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Navigate, Link } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { agente, errorMessage } from '../api/client'
 
 // Guarda a mesma variável de padrão de EXTRACAO_IA_ENABLED em ReceitaForm.jsx.
@@ -17,32 +19,23 @@ const SUGESTOES = [
   'Prepara uma receita para a Maria Souza',
 ]
 
-// Casa links markdown [label](/caminho) que o agente inclui na resposta.
-// Exige o href começar com "/" (rota interna) — evita linkificar uma URL
-// externa que o modelo eventualmente alucine.
-const LINK_RE = /\[([^\]]+)\]\((\/[^\s)]+)\)/g
-
-function renderTexto(texto) {
-  const partes = []
-  let ultimoIndex = 0
-  let match
-  let key = 0
-  LINK_RE.lastIndex = 0
-  while ((match = LINK_RE.exec(texto)) !== null) {
-    if (match.index > ultimoIndex) {
-      partes.push(<span key={key++}>{texto.slice(ultimoIndex, match.index)}</span>)
-    }
-    partes.push(
-      <Link key={key++} to={match[2]} className="btn btn-ghost btn-sm chat-link">
-        {match[1]}
-      </Link>,
+// Renderer customizado pro link markdown ([label](/caminho)) que as tools
+// do agente incluem na resposta. Rota interna (começa com "/") vira
+// navegação SPA via react-router; qualquer outra URL abre em nova aba
+// (defensivo — o prompt já instrui só linkar rotas internas).
+function MarkdownLink({ href, children }) {
+  if (href?.startsWith('/')) {
+    return (
+      <Link to={href} className="btn btn-ghost btn-sm chat-link">
+        {children}
+      </Link>
     )
-    ultimoIndex = match.index + match[0].length
   }
-  if (ultimoIndex < texto.length) {
-    partes.push(<span key={key++}>{texto.slice(ultimoIndex)}</span>)
-  }
-  return partes
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  )
 }
 
 function Bolha({ msg }) {
@@ -50,7 +43,11 @@ function Bolha({ msg }) {
   return (
     <div className={`chat-msg ${isUser ? 'user' : 'agente'}`}>
       <div className="chat-bubble">
-        <p className="chat-texto">{renderTexto(msg.texto)}</p>
+        <div className="chat-texto">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink }}>
+            {msg.texto}
+          </ReactMarkdown>
+        </div>
       </div>
     </div>
   )

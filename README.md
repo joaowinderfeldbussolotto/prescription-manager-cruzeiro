@@ -445,18 +445,22 @@ em caso de erro do modelo primário (ver `backend/app/agent/service.py`).
   dias (TTL do índice do Mongo).
 - **Links clicáveis**: em vez de um campo estruturado à parte, cada tool
   instrui o modelo a incluir um link markdown (`[Nome](/clientes/ID)`) na
-  resposta quando relevante; o frontend faz o parse desse padrão e renderiza
-  como link de verdade. A informação sempre aparece em texto simples também
-  — o link é um bônus de navegação, nunca o único jeito de saber o que
-  aconteceu (o fallback ao modelo menor tende a seguir formatação pior que o
-  principal).
+  resposta quando relevante; o frontend renderiza a resposta como markdown
+  de verdade ([`react-markdown`](https://github.com/remarkjs/react-markdown) +
+  `remark-gfm`, sem `dangerouslySetInnerHTML`), com um renderer customizado
+  pro link virar navegação SPA (`react-router`) em vez de recarregar a
+  página. A informação sempre aparece em texto simples também — o link é um
+  bônus de navegação, nunca o único jeito de saber o que aconteceu (o
+  fallback ao modelo menor tende a seguir formatação pior que o principal).
 - **Observabilidade e prompt management via [Langfuse](https://langfuse.com)**
   (opcional, aditivo — configure `LANGFUSE_SECRET_KEY`/`LANGFUSE_PUBLIC_KEY`
   pra ativar):
   - **Tracing**: cada turno de conversa vira um trace navegável no dashboard
     do Langfuse Cloud (via `CallbackHandler` do LangChain) — dá pra ver o
     prompt exato, as tool calls, o modelo usado (primário ou fallback) e o
-    tempo/custo de cada chamada.
+    tempo/custo de cada chamada. Os traces de uma mesma conversa ficam
+    agrupados numa "session" (`langfuse_session_id` = o mesmo `thread_id`
+    usado pra memória multi-turn).
   - **Prompt management**: o prompt do sistema passa a ser buscado do
     Langfuse (`get_prompt`) em vez de só do arquivo local — editar o prompt
     vira só editar no dashboard do Langfuse, sem redeploy. O arquivo local

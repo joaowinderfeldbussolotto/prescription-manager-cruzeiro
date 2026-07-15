@@ -176,6 +176,12 @@ async def _enviar_mensagem_raw(mensagem: str, *, thread_id: str) -> str:
     }
     if _langfuse_handler is not None:
         config["callbacks"] = [_langfuse_handler]
+        # thread_id é uma string simples — ao contrário do TextPromptClient
+        # do bug acima, é sempre serializável via msgpack, então não corre o
+        # mesmo risco de quebrar o checkpoint. Agrupa os traces dessa
+        # conversa como uma "session" no dashboard do Langfuse (mesma noção
+        # de "uma conversa" que o checkpointer já usa pra memória).
+        config["metadata"] = {"langfuse_session_id": thread_id}
 
     try:
         resultado = await asyncio.wait_for(

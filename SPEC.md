@@ -242,11 +242,18 @@ parametrizável por role pra não precisar refatorar depois.
     `CheckpointMetadata` salvo a cada checkpoint, e o objeto do prompt não é
     um tipo primitivo — bug real visto em produção, corrigido). Precisa de
     um "Text Prompt" com esse nome criado manualmente no dashboard do
-    Langfuse antes de existir lá.
+    Langfuse antes de existir lá. Traces da mesma conversa ficam agrupados
+    numa "session" no dashboard via `config["metadata"] = {"langfuse_session_id": thread_id}`
+    — string simples, sempre serializável via msgpack (ao contrário do
+    objeto do prompt acima), então esse valor não corre o mesmo risco de
+    quebrar o checkpoint.
   - **Links**: cada tool instrui o modelo a incluir `[Nome](/clientes/ID)`
-    na resposta quando relevante; o frontend faz o parse desse padrão
-    markdown. A informação sempre aparece em texto simples também (o link é
-    um bônus, não o único jeito de saber o resultado).
+    na resposta quando relevante; o frontend renderiza a resposta como
+    markdown de verdade (`react-markdown` + `remark-gfm`, sem
+    `dangerouslySetInnerHTML`), com um renderer customizado que troca o link
+    por navegação SPA (`react-router`) quando o href é uma rota interna. A
+    informação sempre aparece em texto simples também (o link é um bônus,
+    não o único jeito de saber o resultado).
   - Controlado por feature toggle (`AGENTE_ENABLED`, default ligado) que
     derruba o endpoint (404) e esconde a aba no frontend quando desligado.
     Sem `GROQ_API_KEY` configurada, o endpoint também fica indisponível

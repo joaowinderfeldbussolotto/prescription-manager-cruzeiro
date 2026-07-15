@@ -159,6 +159,44 @@ def test_prompt_do_langfuse_nunca_vai_pro_metadata_do_checkpoint(monkeypatch):
     assert fake_client.update_current_generation_chamado_com is fake_prompt
 
 
+def test_langfuse_session_id_usa_o_thread_id(monkeypatch):
+    """`config["metadata"]["langfuse_session_id"]` precisa ser o mesmo
+    `thread_id` usado pra memória do checkpointer — agrupa os traces daquela
+    conversa como uma "session" no Langfuse. Isso é seguro (string simples,
+    sempre serializável via msgpack) mesmo quando `_LANGFUSE_PROMPT_OBJ`
+    também está setado (não reintroduz o bug do teste anterior)."""
+
+    class FakePromptObj:
+        pass
+
+    class FakeLangfuseClient:
+        def update_current_generation(self, *, prompt):
+            pass
+
+    class FakeAgent:
+        def __init__(self):
+            self.config_recebido = None
+
+        async def ainvoke(self, state, config):
+            self.config_recebido = config
+            return {"messages": [type("M", (), {"content": "ok"})()]}
+
+    fake_agent = FakeAgent()
+
+    monkeypatch.setattr(agent_service, "_LANGFUSE_PROMPT_OBJ", FakePromptObj())
+    monkeypatch.setattr(agent_service, "_langfuse_client", FakeLangfuseClient())
+    monkeypatch.setattr(agent_service, "_langfuse_handler", object())
+    monkeypatch.setattr(agent_service, "AGENT", fake_agent)
+
+    import asyncio
+
+    asyncio.run(agent_service._enviar_mensagem_raw("oi", thread_id="usuario-123"))
+
+    assert fake_agent.config_recebido["metadata"] == {"langfuse_session_id": "usuario-123"}
+    # o objeto do prompt continua fora do metadata, mesmo com callbacks/metadata ativos
+    assert "langfuse_prompt" not in fake_agent.config_recebido["metadata"]
+
+
 # --- Fiação (agente real, modelo fake, sem rede/Mongo) ----------------------
 
 
