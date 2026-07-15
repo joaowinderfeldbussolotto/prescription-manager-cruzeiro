@@ -12,13 +12,15 @@ agente por causa de um dado mal formatado.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from langchain_core.tools import tool
 from pydantic import ValidationError
 
 from app.db.mongo import get_db
 from app.models import cliente as cliente_repo
 from app.models import receita as receita_repo
-from app.schemas.cliente import ClienteCreate, ClienteUpdate
+from app.schemas.cliente import Acompanhamento, ClienteCreate, ClienteUpdate
 
 
 async def _buscar_clientes(termo: str, limit: int = 10) -> list[dict]:
@@ -268,10 +270,183 @@ async def preparar_receita(termo: str) -> str:
     )
 
 
+@tool
+async def verificar_validade_receita(cliente_nome: str) -> str:
+    """Verifica se a receita atual do cliente é válida agora.
+
+    Use quando o cliente pergunta "posso fazer o pedido agora?" ou
+    "minha receita ainda vale?" ou qualquer pergunta sobre validade de receita.
+
+    Busca a receita mais recente do cliente e compara a data de vencimento com
+    hoje. Retorna: ✅ Válida | ⚠️ Vencendo em < 30 dias | ❌ Expirada.
+    """
+    try:
+        encontrados = await _buscar_clientes(cliente_nome, limit=5)
+    except Exception as exc:  # noqa: BLE001
+        return f"Erro ao buscar cliente: {exc}"
+
+    if not encontrados:
+        return f'Não encontrei nenhum cliente correspondente a "{cliente_nome}".'
+    if len(encontrados) > 1:
+        return (
+            f'Encontrei {len(encontrados)} clientes para "{cliente_nome}" — preciso que '
+            f"o usuário diga qual deles:\n{_formatar_clientes(encontrados)}"
+        )
+
+    cliente = encontrados[0]
+    try:
+        db = get_db()
+        receitas = await receita_repo.list_by_cliente(db, cliente["id"])
+    except Exception as exc:  # noqa: BLE001
+        return f"Erro ao buscar receitas: {exc}"
+
+    if not receitas:
+        return f"{cliente['nome']} não tem nenhuma receita cadastrada ainda."
+
+    receita = receitas[0]
+    data_vencimento = receita.get("validade")
+    if not data_vencimento:
+        return f"Receita de {cliente['nome']} não possui data de validade informada."
+
+    hoje = datetime.now().date()
+    dias_restantes = (data_vencimento - hoje).days
+
+    if dias_restantes < 0:
+        return (
+            f"❌ Receita de {cliente['nome']} expirou há {abs(dias_restantes)} dias "
+            f"({data_vencimento.strftime('%d/%m/%Y')})."
+        )
+    elif dias_restantes < 30:
+        return (
+            f"⚠️ Receita de {cliente['nome']} vence em {dias_restantes} dias "
+            f"({data_vencimento.strftime('%d/%m/%Y')}) — URGENTE!"
+        )
+    else:
+        return (
+            f"✅ Receita de {cliente['nome']} válida até {data_vencimento.strftime('%d/%m/%Y')} "
+            f"({dias_restantes} dias restantes)."
+        )
+
+
+@tool
+async def agendar_acompanhamento(
+    cliente_nome: str, tipo: str, descricao: str, data_agendada: str
+) -> str:
+    """Agenda um acompanhamento/follow-up para o cliente.
+
+    Use quando precisar criar um lembrete: "ligar segunda-feira", "enviar
+    promoção depois", "agendar novo exame", etc.
+
+    Argumentos:
+    - cliente_nome: Nome do cliente (será desambiguado se múltiplas matches).
+    - tipo: Tipo de ação — ligar, email, sms, visita, outro.
+    - descricao: Descrição da ação (ex: "enviar cupom de 15% desconto").
+    - data_agendada: Data em formato DD/MM/YYYY (ex: "20/01/2026").
+
+    Protocolo de desambiguação: se encontrar mais de um cliente, liste-os e
+    peça confirmação antes de agendar.
+    """
+    try:
+        encontrados = await _buscar_clientes(cliente_nome, limit=5)
+    except Exception as exc:  # noqa: BLE001
+        return f"Erro ao buscar cliente: {exc}"
+
+    if not encontrados:
+        return f'Não encontrei nenhum cliente correspondente a "{cliente_nome}".'
+    if len(encontrados) > 1:
+        return (
+            f'Encontrei {len(encontrados)} clientes para "{cliente_nome}" — preciso que '
+            f"o usuário diga qual deles:\n{_formatar_clientes(encontrados)}"
+        )
+
+    cliente = encontrados[0]
+
+    try:
+        data_obj = datetime.strptime(data_agendada, "%d/%m/%Y").date()
+    except ValueError:
+        return f"Data inválida: '{data_agendada}'. Use formato DD/MM/YYYY (ex: 20/01/2026)."
+
+    tipos_validos = ["ligar", "email", "sms", "visita", "outro"]
+    if tipo.lower() not in tipos_validos:
+        return f"Tipo inválido: '{tipo}'. Use: {', '.join(tipos_validos)}."
+
+    try:
+        acompanhamento = Acompanhamento(
+            data_agendada=data_obj,
+            tipo=tipo.lower(),
+            descricao=descricao,
+        ).model_dump()
+
+        db = get_db()
+        await cliente_repo.add_acompanhamento(db, cliente["id"], acompanhamento)
+
+        return (
+            f"✅ Acompanhamento agendado para {cliente['nome']}:\n"
+            f"- Ação: {tipo.upper()}\n"
+            f"- Data: {data_agendada}\n"
+            f"- Descrição: {descricao}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return f"Erro ao agendar acompanhamento: {exc}"
+
+
+@tool
+async def listar_acompanhamentos(cliente_nome: str, filtro: str = "pendentes") -> str:
+    """Lista acompanhamentos/follow-ups agendados para o cliente.
+
+    Use para verificar lembretes: "quais acompanhamentos tem para João?".
+
+    Argumentos:
+    - cliente_nome: Nome do cliente.
+    - filtro: "pendentes" (default, mostra não-concluídos), "concluído" (mostra
+      só os concluídos), ou "todos" (mostra tudo).
+
+    Protocolo de desambiguação: se encontrar mais de um cliente, lista-os e
+    pede confirmação antes de listar.
+    """
+    try:
+        encontrados = await _buscar_clientes(cliente_nome, limit=5)
+    except Exception as exc:  # noqa: BLE001
+        return f"Erro ao buscar cliente: {exc}"
+
+    if not encontrados:
+        return f'Não encontrei nenhum cliente correspondente a "{cliente_nome}".'
+    if len(encontrados) > 1:
+        return (
+            f'Encontrei {len(encontrados)} clientes para "{cliente_nome}" — preciso que '
+            f"o usuário diga qual deles:\n{_formatar_clientes(encontrados)}"
+        )
+
+    cliente = encontrados[0]
+    acompanhamentos = cliente.get("acompanhamentos", [])
+
+    if not acompanhamentos:
+        return f"Nenhum acompanhamento registrado para {cliente['nome']}."
+
+    if filtro == "pendentes":
+        acompanhamentos = [a for a in acompanhamentos if not a.get("concluido")]
+    elif filtro == "concluído":
+        acompanhamentos = [a for a in acompanhamentos if a.get("concluido")]
+
+    if not acompanhamentos:
+        return f"Nenhum acompanhamento {filtro} para {cliente['nome']}."
+
+    linhas = []
+    for a in sorted(acompanhamentos, key=lambda x: x.get("data_agendada", "")):
+        status = "✅" if a.get("concluido") else "⏰"
+        data_str = a.get("data_agendada", "—")
+        linhas.append(f"{status} {data_str} — {a.get('tipo', '—').upper()}: {a.get('descricao', '—')}")
+
+    return f"Acompanhamentos ({filtro}) de {cliente['nome']}:\n" + "\n".join(linhas)
+
+
 TOOLS = [
     cadastrar_cliente,
     editar_cliente,
     buscar_cliente,
     buscar_receitas_cliente,
     preparar_receita,
+    verificar_validade_receita,
+    agendar_acompanhamento,
+    listar_acompanhamentos,
 ]
