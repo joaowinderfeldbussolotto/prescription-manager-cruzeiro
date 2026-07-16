@@ -25,6 +25,7 @@ export default function Layout() {
             </NavLink>
             <NavLink to="/clientes">Clientes</NavLink>
             {AGENTE_ENABLED && <NavLink to="/agente">Agente</NavLink>}
+            {AGENTE_ENABLED && <NavLink to="/acompanhamentos">Acompanhamentos</NavLink>}
           </nav>
           <span className="topbar-spacer" />
           {user && (
