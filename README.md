@@ -61,6 +61,27 @@ banco diretamente** — só functions Python tipadas e validadas fazem isso
 
 ### Arquitetura — fluxo ponta a ponta
 
+![Arquitetura do projeto: usuários → frontend React → backend (FastAPI + LangChain, containerizado via Docker) → provedor de LLM (Groq servindo o gpt-oss-120b da OpenAI); backend também fala com MongoDB (dados transacionais + memória de curto prazo do agente) e MinIO (imagens de receita)](./assets/arch_projeto_cruzeiro.png)
+
+Visão geral do sistema (Excalidraw, `assets/arch_projeto_cruzeiro.png`):
+usuário → **frontend React** → **backend** (FastAPI + o agente LangChain),
+tudo containerizado via Docker Compose. O backend tem duas saídas
+distintas: sobe pro **provedor de LLM** pra decidir/executar tool calls, e
+fala com **MongoDB** (dados transacionais de clientes/receitas/acompanhamentos
+**e** memória de curto prazo do agente — o mesmo banco, dois usos) e
+**MinIO** (imagens de receita). O diagrama já separa visualmente os dois
+papéis dentro de "LLM Provider": **Groq** é quem hospeda a inferência
+(hardware acelerado — o rótulo do desenho diz "TPU Inference"; o termo
+correto pro chip proprietário do Groq é **LPU**, Language Processing Unit,
+não TPU, que é nomenclatura do Google), e **OpenAI `gpt-oss-120b`** é o
+modelo (open-weight) que de fato roda ali — provedor de hospedagem e dono
+do modelo são empresas diferentes, distinção que importa pra justificar a
+escolha (seção seguinte).
+
+O diagrama acima é a visão geral; o diagrama abaixo é o **zoom no fluxo de
+uma mensagem do chat**, com os detalhes de thread/config que o Excalidraw
+não cobre:
+
 ```
 Atendente (chat)                                              MongoDB
       │                                                           ▲
@@ -596,6 +617,10 @@ cd backend && pytest
 
 ## Arquitetura
 
+> Diagrama visual completo (Excalidraw) na seção
+> **"🤖 Engenharia de LLM (Avaliação Final)" → "Arquitetura — fluxo ponta a ponta"**,
+> no topo do README — o ASCII abaixo foca só na parte CRUD (sem o Agente).
+
 ```
 Navegador ──▶ nginx (frontend) ──/api──▶ FastAPI ──▶ MongoDB
     │                                        │
@@ -623,6 +648,10 @@ Navegador ──▶ nginx (frontend) ──/api──▶ FastAPI ──▶ Mongo
 - **Soft delete de cliente**: se houver receitas vinculadas, o cliente é
   arquivado (`deletado=true`) em vez de apagado, preservando o histórico.
 - **CPF**: validação de _formato_ apenas (não valida dígito verificador).
+- **Telefone e CPF únicos**: checados de forma independente entre clientes
+  ativos (não soft-deletados), com `strip()` dos dois lados da comparação.
+  Cadastro/edição com telefone ou CPF já usado por outro cliente ativo
+  devolve 409 (`ClienteDuplicadoError`).
 
 ---
 
@@ -733,6 +762,13 @@ A aplicação suporta **dois modos de login**:
 **Campos opcionais**: CPF (validação de formato apenas), email, data de nascimento, endereço
 
 **Fluxo na UI**: Dashboard → "Novo cliente" → preenche dados → "Salvar" → sucesso (toast + redireciona pra detalhe)
+
+**Telefone e CPF são únicos** entre clientes ativos (checados de forma
+independente, com `strip()` dos dois lados pra espaço em branco acidental
+não driblar a checagem): tentar cadastrar um telefone ou CPF que já
+pertence a outro cliente devolve **409** com uma mensagem indicando o
+cliente existente. Telefone/CPF de um cliente soft-deletado (removido com
+receitas vinculadas) fica livre pra reuso.
 
 ### Fluxo 2: Buscar e Listar Clientes
 
@@ -924,10 +960,12 @@ Feature toggle: `EXTRACAO_IA_ENABLED` (env)
 | **Graus opcionais** | Flexível; receita pode ter só um olho. |
 | **Soft delete** | Cliente com receitas fica oculto, histórico seguro. |
 | **CPF formato apenas** | Validação mínima; dígito verificador fica pra depois. |
+| **Telefone/CPF únicos por cliente ativo** | Evita duplicidade; soft-deletado libera o dado pra reuso. |
 | **Presigned URLs curtas** | Segurança; URL compartilhada após expiração não funciona. |
 | **Feature toggles via `.env`** | Ativa/desativa IA, dev auth, Google, Agente sem redeploy. |
 | **Tools do Agente com instrução na description** | O prompt fica magro; cada capability carrega sua própria instrução de uso. |
 | **Fallback só entre modelos Groq** | Não cobre queda do provedor inteiro — risco aceito dado o escopo. |
+| **Acompanhamentos listados por responsável, não por cliente** | `usuario_id` vem da sessão (nunca da conversa); a aba mostra os seus, cruzando todos os clientes. |
 
 ### Configuração por Feature
 
@@ -946,7 +984,7 @@ Edite `.env` e restarte (`docker compose up -d`):
 | `LANGFUSE_BASE_URL` | `https://cloud.langfuse.com` | Região de dados do Langfuse Cloud |
 | `LANGFUSE_PROMPT_NAME` | `agente-cruzeiro-system-prompt` | Nome do prompt no Langfuse (precisa existir lá) |
 | `COOKIE_SECURE` | `false` | Cookie só funciona com HTTPS se `true` |
-| `CORS_ORIGINS` | `http://localhost:*` | Origins autorizadas pra CORS |
+| `CORS_ORIGINS` | `http://localhost:8080,http://localhost:5173,http://localhost` | Origins autorizadas pra CORS, separadas por vírgula (default do Docker Compose — rodando o backend sozinho fora do Docker, `backend/.env.example` usa portas de dev do Vite: `5173`/`4173`) |
 
 ### Próximos Passos (Road Map)
 
