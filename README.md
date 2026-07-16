@@ -61,26 +61,23 @@ banco diretamente** — só functions Python tipadas e validadas fazem isso
 
 ### Arquitetura — fluxo ponta a ponta
 
-![Arquitetura do projeto: usuários → frontend React → backend (FastAPI + LangChain, containerizado via Docker) → provedor de LLM (Groq servindo o gpt-oss-120b da OpenAI); backend também fala com MongoDB (dados transacionais + memória de curto prazo do agente) e MinIO (imagens de receita)](./assets/arch_projeto_cruzeiro.png)
+![Arquitetura do projeto: frontend, backend (FastAPI + agente LangChain) e provedor de LLM (Groq), com MongoDB e MinIO como dependências do backend](./assets/arch_projeto_cruzeiro.png)
 
-Visão geral do sistema (Excalidraw, `assets/arch_projeto_cruzeiro.png`):
-usuário → **frontend React** → **backend** (FastAPI + o agente LangChain),
-tudo containerizado via Docker Compose. O backend tem duas saídas
-distintas: sobe pro **provedor de LLM** pra decidir/executar tool calls, e
-fala com **MongoDB** (dados transacionais de clientes/receitas/acompanhamentos
-**e** memória de curto prazo do agente — o mesmo banco, dois usos) e
-**MinIO** (imagens de receita). O diagrama já separa visualmente os dois
-papéis dentro de "LLM Provider": **Groq** é quem hospeda a inferência
-(hardware acelerado — o rótulo do desenho diz "TPU Inference"; o termo
-correto pro chip proprietário do Groq é **LPU**, Language Processing Unit,
-não TPU, que é nomenclatura do Google), e **OpenAI `gpt-oss-120b`** é o
-modelo (open-weight) que de fato roda ali — provedor de hospedagem e dono
-do modelo são empresas diferentes, distinção que importa pra justificar a
-escolha (seção seguinte).
+O sistema inteiro sobe junto via Docker Compose, mas o Agente é uma peça
+opcional dentro dele — sem `GROQ_API_KEY`, o resto continua funcionando
+normal. O frontend não decide nada sozinho: toda mensagem do chat vai pro
+backend, que monta o contexto (histórico da conversa + as 8 tools
+disponíveis) e só então chama o modelo no Groq. Quando o modelo pede uma
+tool, quem executa é o próprio backend, direto no MongoDB — o modelo nunca
+toca o banco (mais sobre isso na seção de Tools). O MongoDB, aliás, cumpre
+dois papéis ao mesmo tempo sem precisar de infra extra: guarda os dados
+reais (clientes, receitas, acompanhamentos) e também a memória de curto
+prazo da conversa. O MinIO fica de fora dessa história — só entra na
+trilha de upload de imagem de receita, sem relação com o Agente.
 
-O diagrama acima é a visão geral; o diagrama abaixo é o **zoom no fluxo de
-uma mensagem do chat**, com os detalhes de thread/config que o Excalidraw
-não cobre:
+O diagrama acima dá a visão geral; o de baixo é o **zoom no que acontece
+dentro do backend a cada mensagem**, com os detalhes de thread/config que
+o desenho não cobre:
 
 ```
 Atendente (chat)                                              MongoDB
