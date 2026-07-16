@@ -15,24 +15,14 @@ receita) + autenticação.
 
 ## ⚠️ Estado Atual do Deploy
 
-A instância EC2 (t2.micro) está **rodando, mas sem HTTPS nem Google OAuth**:
+Nesta etapa, o projeto **não está hospedado em nuvem nem exposto por endpoint público**.
 
-- **URL pública**: http://100.51.105.57:8080/
-- **Protocolo**: HTTP-only (sem certificado TLS — aviso no navegador)
-- **Autenticação**: dev auth (allowlist simples, sem validação de senha)
-  - Login: qualquer e-mail na allowlist (default: `admin@example.com`)
-  - Sem suporte a Google OAuth neste momento (requer HTTPS)
-- **Banco/Storage**: MongoDB e MinIO rodando containerizados na instância
-- **Agente**: indisponível até configurar `GROQ_API_KEY` manualmente no `.env`
-  da instância (chave real de console.groq.com) e reiniciar (`docker compose up -d`)
-- **Custo**: ~US$10/mês (ou perto de zero no Free Tier)
+- **Uso atual**: apenas para apresentação e validação local do fluxo de autenticação do Google
+- **Deploy público**: não necessário nesta fase
+- **Infra em nuvem**: não publicada neste momento
+- **Motivo**: como o professor comentou, o endpoint público não era necessário para esta etapa
 
-**Pra usar em produção real**, você vai precisar:
-1. **HTTPS + certificado real**: Let's Encrypt via `deploy/user-data.sh` (scripts prontos, requer rodá-los na instância via SSH)
-2. **Google OAuth**: configurar Client ID no Google Cloud Console após ter HTTPS
-3. Desabilitar dev auth: `DEV_AUTH_ENABLED=false` no `.env`
-
-Esse estado atual serve pra validação e testes; a infra tá pronta pra escalar.
+O restante da infraestrutura pode ser preparado depois, se houver necessidade de publicação externa.
 
 ---
 
