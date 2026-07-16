@@ -17,6 +17,8 @@ const SUGESTOES = [
   'Busca a cliente Maria',
   'Busca as receitas da Maria Souza',
   'Prepara uma receita para a Maria Souza',
+  'Agenda um acompanhamento pra ligar pra Maria Souza dia 20/08/2026 e oferecer desconto',
+  'Quais são os meus acompanhamentos pendentes?',
 ]
 
 // Renderer customizado pro link markdown ([label](/caminho)) que as tools

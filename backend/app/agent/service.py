@@ -155,7 +155,9 @@ else:
     logger.info("GROQ_API_KEY não configurada — aba Agente ficará indisponível (404)")
 
 
-async def _enviar_mensagem_raw(mensagem: str, *, thread_id: str) -> str:
+async def _enviar_mensagem_raw(
+    mensagem: str, *, thread_id: str, usuario_id: str, usuario_nome: str | None = None
+) -> str:
     """Envia uma mensagem ao agente e devolve o texto da resposta final.
 
     Nunca levanta exceção — falhas (rate limit do Groq, timeout, erro de
@@ -171,7 +173,17 @@ async def _enviar_mensagem_raw(mensagem: str, *, thread_id: str) -> str:
             logger.exception("Falha ao associar prompt ao trace do Langfuse")
 
     config: dict = {
-        "configurable": {"thread_id": thread_id},
+        # usuario_id/usuario_nome são strings simples (sempre serializáveis
+        # via msgpack, mesmo risco já avaliado pro thread_id) — tools como
+        # agendar_acompanhamento leem daqui via parâmetro `config:
+        # RunnableConfig` (LangChain injeta automaticamente e NUNCA expõe
+        # esse parâmetro ao LLM, então o responsável não pode ser forjado
+        # pela conversa).
+        "configurable": {
+            "thread_id": thread_id,
+            "usuario_id": usuario_id,
+            "usuario_nome": usuario_nome,
+        },
         "recursion_limit": _RECURSION_LIMIT,
     }
     if _langfuse_handler is not None:

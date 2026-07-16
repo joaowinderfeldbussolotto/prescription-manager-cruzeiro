@@ -78,8 +78,10 @@ def test_agente_happy_path_chama_o_agente(monkeypatch):
     try:
         chamadas = []
 
-        async def fake_enviar_mensagem(mensagem: str, *, thread_id: str) -> str:
-            chamadas.append((mensagem, thread_id))
+        async def fake_enviar_mensagem(
+            mensagem: str, *, thread_id: str, usuario_id: str, usuario_nome: str | None = None
+        ) -> str:
+            chamadas.append((mensagem, thread_id, usuario_id, usuario_nome))
             return "Pronto! Cadastrei a Maria Souza. [Maria Souza](/clientes/665aaa)"
 
         monkeypatch.setattr(agente_router.agent_service, "AGENT", object())
@@ -90,7 +92,9 @@ def test_agente_happy_path_chama_o_agente(monkeypatch):
         body = r.json()
         assert body == {"resposta": "Pronto! Cadastrei a Maria Souza. [Maria Souza](/clientes/665aaa)"}
         # sem session_id no payload -> cai no comportamento antigo (thread fixo por usuário)
-        assert chamadas == [("Cadastra a Maria Souza", FAKE_USER["id"])]
+        assert chamadas == [
+            ("Cadastra a Maria Souza", FAKE_USER["id"], FAKE_USER["id"], FAKE_USER["nome"])
+        ]
     finally:
         _clear_auth_override()
 
@@ -104,8 +108,10 @@ def test_agente_com_session_id_compoe_thread_id(monkeypatch):
     try:
         chamadas = []
 
-        async def fake_enviar_mensagem(mensagem: str, *, thread_id: str) -> str:
-            chamadas.append((mensagem, thread_id))
+        async def fake_enviar_mensagem(
+            mensagem: str, *, thread_id: str, usuario_id: str, usuario_nome: str | None = None
+        ) -> str:
+            chamadas.append((mensagem, thread_id, usuario_id, usuario_nome))
             return "ok"
 
         monkeypatch.setattr(agente_router.agent_service, "AGENT", object())
@@ -116,7 +122,9 @@ def test_agente_com_session_id_compoe_thread_id(monkeypatch):
             json={"mensagem": "oi", "session_id": "abc123"},
         )
         assert r.status_code == 200
-        assert chamadas == [("oi", f"{FAKE_USER['id']}:abc123")]
+        assert chamadas == [
+            ("oi", f"{FAKE_USER['id']}:abc123", FAKE_USER["id"], FAKE_USER["nome"])
+        ]
     finally:
         _clear_auth_override()
 
@@ -180,7 +188,7 @@ def test_prompt_do_langfuse_nunca_vai_pro_metadata_do_checkpoint(monkeypatch):
 
     import asyncio
 
-    asyncio.run(agent_service._enviar_mensagem_raw("oi", thread_id="t1"))
+    asyncio.run(agent_service._enviar_mensagem_raw("oi", thread_id="t1", usuario_id="u1"))
 
     assert "metadata" not in fake_agent.config_recebido
     assert fake_client.update_current_generation_chamado_com is fake_prompt
@@ -217,11 +225,45 @@ def test_langfuse_session_id_usa_o_thread_id(monkeypatch):
 
     import asyncio
 
-    asyncio.run(agent_service._enviar_mensagem_raw("oi", thread_id="usuario-123"))
+    asyncio.run(
+        agent_service._enviar_mensagem_raw(
+            "oi", thread_id="usuario-123", usuario_id="u1", usuario_nome="Fulano"
+        )
+    )
 
     assert fake_agent.config_recebido["metadata"] == {"langfuse_session_id": "usuario-123"}
     # o objeto do prompt continua fora do metadata, mesmo com callbacks/metadata ativos
     assert "langfuse_prompt" not in fake_agent.config_recebido["metadata"]
+
+
+def test_usuario_id_e_nome_vao_pro_configurable_do_agente(monkeypatch):
+    """`usuario_id`/`usuario_nome` (o RESPONSÁVEL, usado por
+    `agendar_acompanhamento`/`listar_meus_acompanhamentos`) precisam chegar
+    em `config["configurable"]` — é de lá que a tool lê via o parâmetro
+    `config: RunnableConfig` que o LangChain injeta (nunca exposto ao LLM)."""
+
+    class FakeAgent:
+        def __init__(self):
+            self.config_recebido = None
+
+        async def ainvoke(self, state, config):
+            self.config_recebido = config
+            return {"messages": [type("M", (), {"content": "ok"})()]}
+
+    fake_agent = FakeAgent()
+    monkeypatch.setattr(agent_service, "AGENT", fake_agent)
+
+    import asyncio
+
+    asyncio.run(
+        agent_service._enviar_mensagem_raw(
+            "oi", thread_id="t1", usuario_id="u42", usuario_nome="Maria"
+        )
+    )
+
+    configurable = fake_agent.config_recebido["configurable"]
+    assert configurable["usuario_id"] == "u42"
+    assert configurable["usuario_nome"] == "Maria"
 
 
 # --- Fiação (agente real, modelo fake, sem rede/Mongo) ----------------------

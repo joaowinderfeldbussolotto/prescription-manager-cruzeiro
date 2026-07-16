@@ -6,14 +6,15 @@ detalhe/edição/remoção diretas por id da receita, e uma ação por
 """
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 
 from app.auth.dependencies import get_current_user
 from app.config import settings
 from app.db.mongo import get_db
-from app.db.serialization import is_valid_object_id
-from datetime import date, datetime
+from app.db.serialization import as_date, is_valid_object_id
 
 from app.models import cliente as cliente_repo
 from app.models import receita as receita_repo
@@ -32,13 +33,6 @@ from app.storage import (
 )
 
 router = APIRouter(tags=["receitas"], dependencies=[Depends(get_current_user)])
-
-
-def _as_date(value: date | datetime | None) -> date | None:
-    """Normaliza para ``date`` — o Mongo devolve ``datetime``, o request ``date``."""
-    if isinstance(value, datetime):
-        return value.date()
-    return value
 
 
 def _to_public(doc: dict) -> ReceitaPublic:
@@ -142,8 +136,8 @@ async def atualizar_receita(receita_id: str, payload: ReceitaUpdate) -> ReceitaP
     merged = {**existing, **changes}
 
     # normaliza para date (existing vem como datetime do Mongo, changes como date)
-    emissao = _as_date(merged.get("data_emissao"))
-    validade = _as_date(merged.get("validade"))
+    emissao = as_date(merged.get("data_emissao"))
+    validade = as_date(merged.get("validade"))
     # emissão nunca fica nula (default = hoje)
     if emissao is None:
         emissao = date.today()
