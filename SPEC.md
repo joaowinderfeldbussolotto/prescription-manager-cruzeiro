@@ -7,18 +7,20 @@ Réplica moderna de um sistema construído originalmente em Oracle APEX para uma
 cada um. Escopo atual: **apenas o módulo óptico** (cliente + receita).
 Relojoaria fica fora por ora.
 
-**Princípio do projeto:** nenhuma integração real de LLM/IA nesta fase. Todo
-ponto onde IA atuaria futuramente usa lógica determinística/mock, claramente
-comentada no código (`# MOCK: substituir por chamada de IA real`).
+**Escopo atual:** CRUD de clientes e receitas + autenticação, mais dois
+componentes de "IA":
 
-**Escopo atual:** CRUD de clientes e receitas + autenticação. Dois
-componentes de "IA" existem, e são 100% mock: extração de dados da receita a
-partir da imagem (ver "Extração (mock) de dados da receita" nos Endpoints) e
-o **Agente** — um chat em linguagem natural que cadastra/edita/busca
-clientes (ver "Agente (mock)" nos Endpoints). Nos dois, a interpretação é
-simulada, mas cada um está atrás de feature toggle. A identificação de
-cliente por imagem segue registrada só como decisão anotada na seção "Fase
-Futura" no final deste arquivo, sem tela nem endpoint ainda.
+- **Extração de dados da receita a partir da imagem** — 100% mock (ver
+  "Extração (mock) de dados da receita" nos Endpoints); todo ponto onde IA
+  real atuaria aqui usa lógica determinística, claramente comentada no
+  código (`# MOCK: substituir por chamada de IA real`).
+- **Agente** — chat em linguagem natural que cadastra/edita/busca clientes
+  (ver "Agente" nos Endpoints). Este é um **agente LLM real** (LangChain +
+  Groq, tools sobre o banco) — não é mock.
+
+Ambos ficam atrás de feature toggle. A identificação de cliente por imagem
+segue registrada só como decisão anotada na seção "Fase Futura" no final
+deste arquivo, sem tela nem endpoint ainda.
 
 ---
 
@@ -204,21 +206,69 @@ parametrizável por role pra não precisar refatorar depois.
   (`EXTRACAO_IA_ENABLED`, default ligado) que derruba o endpoint (404) e
   esconde o botão no frontend quando desligado.
 
-### Agente (mock)
-- `POST /agente/mensagem` — recebe `{ mensagem }`, retorna
-  `{ resposta, acoes, links, mock, aviso }`. **Interpretação 100% mock**: sem
-  LLM, sem regex — correspondência exata contra um catálogo fixo de frases
-  conhecidas (`CENARIOS_MOCK` em `app/schemas/agente.py`), porque o frontend
-  só oferece essas frases como chips de sugestão (sem texto livre nesta
-  fase). **As tools que a interpretação aciona são reais**: cadastram,
-  editam e buscam clientes de verdade (reusam `cliente_repo`, os mesmos
-  repositórios de `routers/clientes.py`) — os links retornados abrem
-  clientes reais com dados carregados; busca ambígua por nome retorna um
-  link por cliente encontrado. Controlado por feature toggle
-  (`AGENTE_ENABLED`, default ligado) que derruba o endpoint (404) e esconde a
-  aba no frontend quando desligado. Quando um LLM real substituir o exact
-  match, o contrato de request/response e a execução das tools não mudam —
-  só a implementação de `interpretar_mensagem`.
+### Agente (LLM real)
+- `POST /agente/mensagem` — recebe `{ mensagem, session_id? }`, retorna
+  `{ resposta }`. `session_id` (opcional) identifica o carregamento de
+  página do chat no frontend (gerado uma vez por mount — F5 gera um novo);
+  o router combina com o id do usuário autenticado
+  (`thread_id = user_id:session_id`) pra dar a cada carregamento de página
+  sua própria memória/conversa, em vez de um thread fixo pra sempre por
+  usuário. Sem `session_id`, cai no comportamento anterior (thread só por
+  usuário). **Agente real** via LangChain `create_agent`, modelo primário
+  Groq
+  `openai/gpt-oss-120b` (`init_chat_model`), com `ModelFallbackMiddleware`
+  pra `openai/gpt-oss-20b` em caso de erro. Frontend aceita texto livre;
+  chips de sugestão continuam existindo como atalhos.
+  - **Tools bem definidas** (`app/agent/tools.py`), não uma query genérica:
+    `cadastrar_cliente`, `editar_cliente`, `buscar_cliente`,
+    `buscar_receitas_cliente`, `preparar_receita` — todas reusam
+    `cliente_repo`/`receita_repo` (os mesmos repositórios de
+    `routers/clientes.py`), batendo no banco de verdade. Busca ambígua por
+    nome faz o agente listar todos os candidatos e perguntar, em vez de
+    adivinhar.
+  - **Instrução de uso na description de cada tool**, não no prompt — o
+    prompt do sistema (`app/agent/prompts/system_prompt.md`, arquivo
+    externo) carrega só identidade ("Assistente Virtual da Cruzeiro") e
+    regras gerais (idioma, nunca inventar dado).
+  - **Memória multi-turn** via checkpointer do LangGraph
+    (`langgraph-checkpoint-mongodb`, `MongoDBSaver`), thread por usuário, com
+    TTL pra expirar histórico antigo.
+  - **Observabilidade e prompt management via Langfuse** (opcional/aditivo —
+    `LANGFUSE_SECRET_KEY`/`LANGFUSE_PUBLIC_KEY`): `CallbackHandler` do
+    `langfuse.langchain` traça cada turno (prompt, tool calls, modelo usado,
+    tempo/custo) no dashboard do Langfuse Cloud. O prompt do sistema passa a
+    ser buscado via `get_prompt(LANGFUSE_PROMPT_NAME, fallback=<texto local>)`
+    — se Langfuse não estiver configurado ou a busca falhar, usa o
+    `fallback` nativo do SDK (o conteúdo de `system_prompt.md`), sem
+    derrubar o agente. O objeto do prompt é associado à geração via
+    `update_current_generation(prompt=...)` dentro de um span aberto por
+    `@observe()` — **não** via `config={"metadata": {"langfuse_prompt": ...}}`
+    (esse padrão, documentado pra chains simples do LangChain, quebra a
+    serialização msgpack do checkpoint quando há um checkpointer persistente
+    como o `MongoDBSaver`: o LangGraph mescla `config["metadata"]` no
+    `CheckpointMetadata` salvo a cada checkpoint, e o objeto do prompt não é
+    um tipo primitivo — bug real visto em produção, corrigido). Precisa de
+    um "Text Prompt" com esse nome criado manualmente no dashboard do
+    Langfuse antes de existir lá. Traces da mesma conversa ficam agrupados
+    numa "session" no dashboard via `config["metadata"] = {"langfuse_session_id": thread_id}`
+    — string simples, sempre serializável via msgpack (ao contrário do
+    objeto do prompt acima), então esse valor não corre o mesmo risco de
+    quebrar o checkpoint.
+  - **Links**: cada tool instrui o modelo a incluir `[Nome](/clientes/ID)`
+    na resposta quando relevante; o frontend renderiza a resposta como
+    markdown de verdade (`react-markdown` + `remark-gfm`, sem
+    `dangerouslySetInnerHTML`), com um renderer customizado que troca o link
+    por navegação SPA (`react-router`) quando o href é uma rota interna. A
+    informação sempre aparece em texto simples também (o link é um bônus,
+    não o único jeito de saber o resultado).
+  - Controlado por feature toggle (`AGENTE_ENABLED`, default ligado) que
+    derruba o endpoint (404) e esconde a aba no frontend quando desligado.
+    Sem `GROQ_API_KEY` configurada, o endpoint também fica indisponível
+    (404) mesmo com o toggle ligado.
+  - **Limitações assumidas**: fallback só entre modelos Groq (não cobre
+    queda do provedor inteiro); rate limit do tier grátis é baixo e
+    tool-calling multi-step consome tokens rápido — erros viram resposta
+    amigável no chat, não 500; sem botão de "nova conversa" ainda.
 
 ---
 
@@ -238,9 +288,9 @@ parametrizável por role pra não precisar refatorar depois.
    "documento + metadados")
 6. **Dashboard leve** (opcional, 3 cards) — total de clientes, receitas
    cadastradas no mês, receitas vencendo nos próximos 30 dias
-7. **Agente** (mock) — chat em linguagem natural via catálogo fixo de
-   sugestões (sem texto livre ainda); cadastra/edita/busca clientes de
-   verdade, com trilha de tools executadas e links pras páginas afetadas
+7. **Agente** — chat em linguagem natural (texto livre + chips de sugestão),
+   agente LLM real (LangChain + Groq); cadastra/edita/busca clientes de
+   verdade, com links clicáveis embutidos na resposta
 
 ---
 
@@ -249,10 +299,9 @@ parametrizável por role pra não precisar refatorar depois.
 - Módulo de relojoaria / ordem de serviço
 - Autoregistro de usuário e tela de gerenciamento da allowlist (cadastro de
   usuário é manual, direto no banco, por ora)
-- IA/LLM real além do já implementado (ver "Extração (mock) de dados da
-  receita" e "Agente (mock)" acima) — as duas features existentes são mock;
-  identificação de cliente por imagem e recomendação de lente seguem sem
-  nenhuma implementação, nem mock; ver "Fase Futura"
+- Extração de dados de receita por imagem continua mock (ver "Extração
+  (mock) de dados da receita" acima) — o Agente de chat já é real; ver
+  "Fase Futura" pro que ainda não tem nem mock
 - Deploy em Lambda/API Gateway/DynamoDB/S3 (Docker Compose local é suficiente
   por ora; migração AWS é próxima fase)
 
@@ -263,16 +312,11 @@ parametrizável por role pra não precisar refatorar depois.
 Fica registrado aqui pra não se perder a decisão, sem gerar código ou tela
 nesta fase:
 
-1. **Copilot de busca textual com LLM real** — a experiência já foi
-   *explorada via mock* na feature "Agente" (ver Endpoints acima): chat que
-   cadastra/edita/busca clientes, com tools reais no banco e contrato de API
-   já desenhado (`AgenteRequest`/`AgenteResponse` em `app/schemas/agente.py`).
-   O que falta é só trocar a interpretação — hoje por correspondência exata
-   contra um catálogo fixo de frases, no futuro por tool-calling de um LLM de
-   verdade — e destravar o campo de texto livre no frontend
-   (`frontend/src/pages/Agente.jsx`). Contrato de API e execução das tools
-   não mudam.
-2. **Identificação de cliente por imagem** — upload de receita sem cliente
+1. **Identificação de cliente por imagem** — upload de receita sem cliente
    pré-selecionado; modelo multimodal lê a imagem e chama uma tool de busca
    pra encontrar o cliente correspondente. Ainda sem contrato de API nem
    mock — fica pra quando essa fase entrar em planejamento de verdade.
+2. **Botão de "nova conversa" no Agente sem precisar de F5** — hoje o
+   `thread_id` combina o usuário autenticado com um `session_id` gerado
+   pelo frontend a cada carregamento de página (F5 = conversa nova), mas
+   não há como resetar a memória dentro da mesma página sem recarregar.

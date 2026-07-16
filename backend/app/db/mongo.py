@@ -59,3 +59,8 @@ async def _ensure_indexes(db: AsyncDatabase) -> None:
     # receitas: listar por cliente e ordenar/filtrar por validade
     await db.receitas.create_index([("cliente_id", ASCENDING)])
     await db.receitas.create_index([("validade", ASCENDING)])
+
+    # acompanhamentos: listagem principal é por responsável (usuario_id),
+    # ordenada por data agendada
+    await db.acompanhamentos.create_index([("usuario_id", ASCENDING), ("data_agendada", ASCENDING)])
+    await db.acompanhamentos.create_index([("cliente_id", ASCENDING)])

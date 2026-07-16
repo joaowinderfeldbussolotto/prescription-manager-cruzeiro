@@ -33,7 +33,10 @@ def _ensure_valid_id(cliente_id: str) -> None:
 @router.post("", response_model=ClientePublic, status_code=status.HTTP_201_CREATED)
 async def criar_cliente(payload: ClienteCreate) -> ClientePublic:
     db = get_db()
-    created = await cliente_repo.create(db, payload.model_dump())
+    try:
+        created = await cliente_repo.create(db, payload.model_dump())
+    except cliente_repo.ClienteDuplicadoError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return ClientePublic(**created)
 
 
@@ -80,7 +83,10 @@ async def atualizar_cliente(cliente_id: str, payload: ClienteUpdate) -> ClienteP
     _ensure_valid_id(cliente_id)
     db = get_db()
     data = payload.model_dump(exclude_unset=True)
-    updated = await cliente_repo.update(db, cliente_id, data)
+    try:
+        updated = await cliente_repo.update(db, cliente_id, data)
+    except cliente_repo.ClienteDuplicadoError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if updated is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cliente não encontrado")
     return ClientePublic(**updated)

@@ -52,5 +52,18 @@ def date_to_datetime(value: date | datetime | None) -> datetime | None:
     return datetime.combine(value, time.min, tzinfo=timezone.utc)
 
 
+def as_date(value: date | datetime | None) -> date | None:
+    """Inverso de `date_to_datetime`: normaliza para ``date`` puro.
+
+    O Mongo sempre devolve ``datetime`` (ver `date_to_datetime`); código que
+    compara essas datas com um ``date`` puro (do request, ou `date.today()`)
+    precisa normalizar os dois lados primeiro — misturar `datetime` e `date`
+    numa subtração levanta `TypeError`.
+    """
+    if isinstance(value, datetime):
+        return value.date()
+    return value
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)

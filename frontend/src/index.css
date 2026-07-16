@@ -762,16 +762,40 @@ tbody tr:hover {
   background: var(--gold-100);
   border-color: var(--gold-200);
 }
-.chat-links {
-  margin-top: 0.6rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+.chat-texto > *:first-child {
+  margin-top: 0;
 }
-.chat-aviso {
-  margin: 0.6rem 0 0;
-  padding: 0.5rem 0.7rem;
-  font-size: 0.8rem;
+.chat-texto > *:last-child {
+  margin-bottom: 0;
+}
+.chat-texto ul,
+.chat-texto ol {
+  margin: 0.4rem 0;
+  padding-left: 1.3rem;
+}
+.chat-texto li {
+  margin: 0.15rem 0;
+}
+.chat-texto code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--surface-2);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.chat-texto pre {
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+  overflow-x: auto;
+}
+.chat-texto pre code {
+  background: none;
+  padding: 0;
+}
+.chat-link {
+  margin: 0 0.15rem;
+  vertical-align: middle;
 }
 .chat-sugestoes {
   display: flex;
