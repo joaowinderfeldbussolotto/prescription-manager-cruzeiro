@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Navigate, Link } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { agente, errorMessage } from '../api/client'
 
 // Guarda a mesma variável de padrão de EXTRACAO_IA_ENABLED em ReceitaForm.jsx.
@@ -15,34 +17,39 @@ const SUGESTOES = [
   'Busca a cliente Maria',
   'Busca as receitas da Maria Souza',
   'Prepara uma receita para a Maria Souza',
+  'Agenda um acompanhamento pra ligar pra Maria Souza dia 20/08/2026 e oferecer desconto',
+  'Quais são os meus acompanhamentos pendentes?',
 ]
 
-// Casa links markdown [label](/caminho) que o agente inclui na resposta.
-// Exige o href começar com "/" (rota interna) — evita linkificar uma URL
-// externa que o modelo eventualmente alucine.
-const LINK_RE = /\[([^\]]+)\]\((\/[^\s)]+)\)/g
-
-function renderTexto(texto) {
-  const partes = []
-  let ultimoIndex = 0
-  let match
-  let key = 0
-  LINK_RE.lastIndex = 0
-  while ((match = LINK_RE.exec(texto)) !== null) {
-    if (match.index > ultimoIndex) {
-      partes.push(<span key={key++}>{texto.slice(ultimoIndex, match.index)}</span>)
-    }
-    partes.push(
-      <Link key={key++} to={match[2]} className="btn btn-ghost btn-sm chat-link">
-        {match[1]}
-      </Link>,
+// Renderer customizado pro link markdown ([label](/caminho)) que as tools
+// do agente incluem na resposta. Rota interna (começa com "/") vira
+// navegação SPA via react-router; qualquer outra URL abre em nova aba
+// (defensivo — o prompt já instrui só linkar rotas internas).
+function MarkdownLink({ href, children }) {
+  if (href?.startsWith('/')) {
+    return (
+      <Link to={href} className="btn btn-ghost btn-sm chat-link">
+        {children}
+      </Link>
     )
-    ultimoIndex = match.index + match[0].length
   }
-  if (ultimoIndex < texto.length) {
-    partes.push(<span key={key++}>{texto.slice(ultimoIndex)}</span>)
-  }
-  return partes
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  )
+}
+
+// Identifica esta "aba/carregamento de página" do chat — não confundir com
+// a sessão de autenticação (cookie de login). Gerado uma vez por mount do
+// componente: um F5 remonta tudo do zero, então o backend passa a tratar
+// como uma conversa nova (memória multi-turn + agrupamento no Langfuse).
+// Usa crypto.getRandomValues() em vez de crypto.randomUUID() porque este
+// último só funciona em contexto seguro (HTTPS/localhost) — a instância
+// atual em produção roda em HTTP puro.
+function gerarSessionId() {
+  const bytes = crypto.getRandomValues(new Uint32Array(4))
+  return Array.from(bytes, (n) => n.toString(16)).join('-')
 }
 
 function Bolha({ msg }) {
@@ -50,7 +57,11 @@ function Bolha({ msg }) {
   return (
     <div className={`chat-msg ${isUser ? 'user' : 'agente'}`}>
       <div className="chat-bubble">
-        <p className="chat-texto">{renderTexto(msg.texto)}</p>
+        <div className="chat-texto">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink }}>
+            {msg.texto}
+          </ReactMarkdown>
+        </div>
       </div>
     </div>
   )
@@ -60,6 +71,7 @@ export default function Agente() {
   const [mensagens, setMensagens] = useState([])
   const [enviando, setEnviando] = useState(false)
   const [texto, setTexto] = useState('')
+  const [sessionId] = useState(gerarSessionId)
 
   if (!AGENTE_ENABLED) {
     return <Navigate to="/" replace />
@@ -71,7 +83,7 @@ export default function Agente() {
     setMensagens((prev) => [...prev, { autor: 'user', texto: msg }])
     setEnviando(true)
     try {
-      const res = await agente.enviar(msg)
+      const res = await agente.enviar(msg, sessionId)
       setMensagens((prev) => [...prev, { autor: 'agente', texto: res.resposta }])
     } catch (err) {
       setMensagens((prev) => [...prev, { autor: 'agente', texto: errorMessage(err) }])

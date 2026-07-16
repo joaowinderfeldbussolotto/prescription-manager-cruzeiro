@@ -17,7 +17,7 @@ from app.agent import service as agent_service
 from app.config import settings
 from app.db import mongo
 from app.models import usuario as usuario_repo
-from app.routers import agente, auth, clientes, dashboard, receitas, uploads
+from app.routers import acompanhamentos, agente, auth, clientes, dashboard, receitas, uploads
 from app.storage import ensure_bucket
 
 logging.basicConfig(level=logging.INFO)
@@ -57,7 +57,15 @@ app.add_middleware(
 )
 
 # Todas as rotas de negócio ficam sob o prefixo /api (proxy amigável).
-for r in (auth.router, clientes.router, receitas.router, uploads.router, dashboard.router, agente.router):
+for r in (
+    auth.router,
+    clientes.router,
+    receitas.router,
+    uploads.router,
+    dashboard.router,
+    agente.router,
+    acompanhamentos.router,
+):
     app.include_router(r, prefix=settings.api_prefix)
 
 

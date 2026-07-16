@@ -78,8 +78,10 @@ def test_agente_happy_path_chama_o_agente(monkeypatch):
     try:
         chamadas = []
 
-        async def fake_enviar_mensagem(mensagem: str, *, thread_id: str) -> str:
-            chamadas.append((mensagem, thread_id))
+        async def fake_enviar_mensagem(
+            mensagem: str, *, thread_id: str, usuario_id: str, usuario_nome: str | None = None
+        ) -> str:
+            chamadas.append((mensagem, thread_id, usuario_id, usuario_nome))
             return "Pronto! Cadastrei a Maria Souza. [Maria Souza](/clientes/665aaa)"
 
         monkeypatch.setattr(agente_router.agent_service, "AGENT", object())
@@ -89,7 +91,40 @@ def test_agente_happy_path_chama_o_agente(monkeypatch):
         assert r.status_code == 200
         body = r.json()
         assert body == {"resposta": "Pronto! Cadastrei a Maria Souza. [Maria Souza](/clientes/665aaa)"}
-        assert chamadas == [("Cadastra a Maria Souza", FAKE_USER["id"])]
+        # sem session_id no payload -> cai no comportamento antigo (thread fixo por usuário)
+        assert chamadas == [
+            ("Cadastra a Maria Souza", FAKE_USER["id"], FAKE_USER["id"], FAKE_USER["nome"])
+        ]
+    finally:
+        _clear_auth_override()
+
+
+def test_agente_com_session_id_compoe_thread_id(monkeypatch):
+    """Com `session_id` (gerado pelo frontend a cada carregamento de página,
+    F5 inclusive), o thread_id vira `user_id:session_id` — cada carregamento
+    de página ganha sua própria memória/conversa, em vez de um thread fixo
+    pra sempre por usuário."""
+    _authenticate()
+    try:
+        chamadas = []
+
+        async def fake_enviar_mensagem(
+            mensagem: str, *, thread_id: str, usuario_id: str, usuario_nome: str | None = None
+        ) -> str:
+            chamadas.append((mensagem, thread_id, usuario_id, usuario_nome))
+            return "ok"
+
+        monkeypatch.setattr(agente_router.agent_service, "AGENT", object())
+        monkeypatch.setattr(agente_router.agent_service, "enviar_mensagem", fake_enviar_mensagem)
+
+        r = client.post(
+            "/api/agente/mensagem",
+            json={"mensagem": "oi", "session_id": "abc123"},
+        )
+        assert r.status_code == 200
+        assert chamadas == [
+            ("oi", f"{FAKE_USER['id']}:abc123", FAKE_USER["id"], FAKE_USER["nome"])
+        ]
     finally:
         _clear_auth_override()
 
@@ -101,6 +136,134 @@ def test_agente_mensagem_vazia_422():
         assert r.status_code == 422
     finally:
         _clear_auth_override()
+
+
+def test_prompt_local_sem_langfuse_configurado():
+    """Sem LANGFUSE_SECRET_KEY/LANGFUSE_PUBLIC_KEY (default no ambiente de
+    teste), o client do Langfuse nem é construído, e o prompt do sistema
+    vem do arquivo local — sem chamada de rede."""
+    assert agent_service._langfuse_client is None
+    texto, prompt_obj = agent_service._load_system_prompt()
+    assert prompt_obj is None
+    assert texto == agent_service._PROMPT_PATH.read_text(encoding="utf-8")
+    assert texto == _SYSTEM_PROMPT
+
+
+def test_prompt_do_langfuse_nunca_vai_pro_metadata_do_checkpoint(monkeypatch):
+    """Regressão: colocar o objeto do prompt do Langfuse (TextPromptClient)
+    em `config["metadata"]` quebra a serialização msgpack do checkpoint no
+    Mongo assim que o agente tenta salvar (visto em produção: `TypeError:
+    Type is not msgpack serializable: TextPromptClient` — o LangGraph
+    mescla `config["metadata"]` no CheckpointMetadata persistido pelo
+    MongoDBSaver). A associação do prompt precisa ir por
+    `update_current_generation(prompt=...)`, nunca pelo `config` do
+    `.ainvoke()`."""
+
+    class FakePromptObj:
+        """Qualquer classe custom não-primitiva reproduz o bug — não
+        precisa ser um TextPromptClient de verdade."""
+
+    class FakeLangfuseClient:
+        def __init__(self):
+            self.update_current_generation_chamado_com = None
+
+        def update_current_generation(self, *, prompt):
+            self.update_current_generation_chamado_com = prompt
+
+    class FakeAgent:
+        def __init__(self):
+            self.config_recebido = None
+
+        async def ainvoke(self, state, config):
+            self.config_recebido = config
+            return {"messages": [type("M", (), {"content": "ok"})()]}
+
+    fake_prompt = FakePromptObj()
+    fake_client = FakeLangfuseClient()
+    fake_agent = FakeAgent()
+
+    monkeypatch.setattr(agent_service, "_LANGFUSE_PROMPT_OBJ", fake_prompt)
+    monkeypatch.setattr(agent_service, "_langfuse_client", fake_client)
+    monkeypatch.setattr(agent_service, "AGENT", fake_agent)
+
+    import asyncio
+
+    asyncio.run(agent_service._enviar_mensagem_raw("oi", thread_id="t1", usuario_id="u1"))
+
+    assert "metadata" not in fake_agent.config_recebido
+    assert fake_client.update_current_generation_chamado_com is fake_prompt
+
+
+def test_langfuse_session_id_usa_o_thread_id(monkeypatch):
+    """`config["metadata"]["langfuse_session_id"]` precisa ser o mesmo
+    `thread_id` usado pra memória do checkpointer — agrupa os traces daquela
+    conversa como uma "session" no Langfuse. Isso é seguro (string simples,
+    sempre serializável via msgpack) mesmo quando `_LANGFUSE_PROMPT_OBJ`
+    também está setado (não reintroduz o bug do teste anterior)."""
+
+    class FakePromptObj:
+        pass
+
+    class FakeLangfuseClient:
+        def update_current_generation(self, *, prompt):
+            pass
+
+    class FakeAgent:
+        def __init__(self):
+            self.config_recebido = None
+
+        async def ainvoke(self, state, config):
+            self.config_recebido = config
+            return {"messages": [type("M", (), {"content": "ok"})()]}
+
+    fake_agent = FakeAgent()
+
+    monkeypatch.setattr(agent_service, "_LANGFUSE_PROMPT_OBJ", FakePromptObj())
+    monkeypatch.setattr(agent_service, "_langfuse_client", FakeLangfuseClient())
+    monkeypatch.setattr(agent_service, "_langfuse_handler", object())
+    monkeypatch.setattr(agent_service, "AGENT", fake_agent)
+
+    import asyncio
+
+    asyncio.run(
+        agent_service._enviar_mensagem_raw(
+            "oi", thread_id="usuario-123", usuario_id="u1", usuario_nome="Fulano"
+        )
+    )
+
+    assert fake_agent.config_recebido["metadata"] == {"langfuse_session_id": "usuario-123"}
+    # o objeto do prompt continua fora do metadata, mesmo com callbacks/metadata ativos
+    assert "langfuse_prompt" not in fake_agent.config_recebido["metadata"]
+
+
+def test_usuario_id_e_nome_vao_pro_configurable_do_agente(monkeypatch):
+    """`usuario_id`/`usuario_nome` (o RESPONSÁVEL, usado por
+    `agendar_acompanhamento`/`listar_meus_acompanhamentos`) precisam chegar
+    em `config["configurable"]` — é de lá que a tool lê via o parâmetro
+    `config: RunnableConfig` que o LangChain injeta (nunca exposto ao LLM)."""
+
+    class FakeAgent:
+        def __init__(self):
+            self.config_recebido = None
+
+        async def ainvoke(self, state, config):
+            self.config_recebido = config
+            return {"messages": [type("M", (), {"content": "ok"})()]}
+
+    fake_agent = FakeAgent()
+    monkeypatch.setattr(agent_service, "AGENT", fake_agent)
+
+    import asyncio
+
+    asyncio.run(
+        agent_service._enviar_mensagem_raw(
+            "oi", thread_id="t1", usuario_id="u42", usuario_nome="Maria"
+        )
+    )
+
+    configurable = fake_agent.config_recebido["configurable"]
+    assert configurable["usuario_id"] == "u42"
+    assert configurable["usuario_nome"] == "Maria"
 
 
 # --- Fiação (agente real, modelo fake, sem rede/Mongo) ----------------------

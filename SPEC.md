@@ -207,8 +207,15 @@ parametrizável por role pra não precisar refatorar depois.
   esconde o botão no frontend quando desligado.
 
 ### Agente (LLM real)
-- `POST /agente/mensagem` — recebe `{ mensagem }`, retorna `{ resposta }`.
-  **Agente real** via LangChain `create_agent`, modelo primário Groq
+- `POST /agente/mensagem` — recebe `{ mensagem, session_id? }`, retorna
+  `{ resposta }`. `session_id` (opcional) identifica o carregamento de
+  página do chat no frontend (gerado uma vez por mount — F5 gera um novo);
+  o router combina com o id do usuário autenticado
+  (`thread_id = user_id:session_id`) pra dar a cada carregamento de página
+  sua própria memória/conversa, em vez de um thread fixo pra sempre por
+  usuário. Sem `session_id`, cai no comportamento anterior (thread só por
+  usuário). **Agente real** via LangChain `create_agent`, modelo primário
+  Groq
   `openai/gpt-oss-120b` (`init_chat_model`), com `ModelFallbackMiddleware`
   pra `openai/gpt-oss-20b` em caso de erro. Frontend aceita texto livre;
   chips de sugestão continuam existindo como atalhos.
@@ -226,10 +233,34 @@ parametrizável por role pra não precisar refatorar depois.
   - **Memória multi-turn** via checkpointer do LangGraph
     (`langgraph-checkpoint-mongodb`, `MongoDBSaver`), thread por usuário, com
     TTL pra expirar histórico antigo.
+  - **Observabilidade e prompt management via Langfuse** (opcional/aditivo —
+    `LANGFUSE_SECRET_KEY`/`LANGFUSE_PUBLIC_KEY`): `CallbackHandler` do
+    `langfuse.langchain` traça cada turno (prompt, tool calls, modelo usado,
+    tempo/custo) no dashboard do Langfuse Cloud. O prompt do sistema passa a
+    ser buscado via `get_prompt(LANGFUSE_PROMPT_NAME, fallback=<texto local>)`
+    — se Langfuse não estiver configurado ou a busca falhar, usa o
+    `fallback` nativo do SDK (o conteúdo de `system_prompt.md`), sem
+    derrubar o agente. O objeto do prompt é associado à geração via
+    `update_current_generation(prompt=...)` dentro de um span aberto por
+    `@observe()` — **não** via `config={"metadata": {"langfuse_prompt": ...}}`
+    (esse padrão, documentado pra chains simples do LangChain, quebra a
+    serialização msgpack do checkpoint quando há um checkpointer persistente
+    como o `MongoDBSaver`: o LangGraph mescla `config["metadata"]` no
+    `CheckpointMetadata` salvo a cada checkpoint, e o objeto do prompt não é
+    um tipo primitivo — bug real visto em produção, corrigido). Precisa de
+    um "Text Prompt" com esse nome criado manualmente no dashboard do
+    Langfuse antes de existir lá. Traces da mesma conversa ficam agrupados
+    numa "session" no dashboard via `config["metadata"] = {"langfuse_session_id": thread_id}`
+    — string simples, sempre serializável via msgpack (ao contrário do
+    objeto do prompt acima), então esse valor não corre o mesmo risco de
+    quebrar o checkpoint.
   - **Links**: cada tool instrui o modelo a incluir `[Nome](/clientes/ID)`
-    na resposta quando relevante; o frontend faz o parse desse padrão
-    markdown. A informação sempre aparece em texto simples também (o link é
-    um bônus, não o único jeito de saber o resultado).
+    na resposta quando relevante; o frontend renderiza a resposta como
+    markdown de verdade (`react-markdown` + `remark-gfm`, sem
+    `dangerouslySetInnerHTML`), com um renderer customizado que troca o link
+    por navegação SPA (`react-router`) quando o href é uma rota interna. A
+    informação sempre aparece em texto simples também (o link é um bônus,
+    não o único jeito de saber o resultado).
   - Controlado por feature toggle (`AGENTE_ENABLED`, default ligado) que
     derruba o endpoint (404) e esconde a aba no frontend quando desligado.
     Sem `GROQ_API_KEY` configurada, o endpoint também fica indisponível
@@ -285,5 +316,7 @@ nesta fase:
    pré-selecionado; modelo multimodal lê a imagem e chama uma tool de busca
    pra encontrar o cliente correspondente. Ainda sem contrato de API nem
    mock — fica pra quando essa fase entrar em planejamento de verdade.
-2. **Botão de "nova conversa" no Agente** — hoje a memória do chat é um
-   thread contínuo por usuário (com TTL), sem opção de reset manual.
+2. **Botão de "nova conversa" no Agente sem precisar de F5** — hoje o
+   `thread_id` combina o usuário autenticado com um `session_id` gerado
+   pelo frontend a cada carregamento de página (F5 = conversa nova), mas
+   não há como resetar a memória dentro da mesma página sem recarregar.
